@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+.env
+certs/
+*.p12
+*.pfx
+*.pem
+*.key
+*.zip

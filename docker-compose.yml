@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# Example for running the bridge on a TAK Server host. Copy .env.example to
+# .env, fill it in, put the bridge user's certificate files in ./certs, then:
+#   docker compose up -d
+#
+# TAK support is in development. No image is published yet, so this builds
+# from source. Once release images exist, use the image line instead.
+
+services:
+  tak-bridge:
+    build: .
+    # image: ghcr.io/crowdcad/tak-bridge:<version>
+    env_file: .env
+    volumes:
+      - ./certs:/certs:ro
+    restart: unless-stopped
+    # Uncomment if TAK_HOST should reach a TAK Server published on the host itself:
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
