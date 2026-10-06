@@ -17,4 +17,13 @@ describe('createLogger', () => {
     expect(typeof first.time).toBe('string');
     expect(JSON.parse(lines[1]!).level).toBe('error');
   });
+
+  it('does not let fields overwrite time, level or msg', () => {
+    const lines: string[] = [];
+    createLogger('debug', (line) => lines.push(line)).info('real', { time: 'fake', level: 'x', msg: 'y', extra: 1 });
+    const entry = JSON.parse(lines[0]!);
+    expect(entry).toMatchObject({ level: 'info', msg: 'real', extra: 1 });
+    expect(entry.time).not.toBe('fake');
+    expect(Object.keys(entry).slice(0, 3)).toEqual(['time', 'level', 'msg']);
+  });
 });

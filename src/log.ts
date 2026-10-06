@@ -18,7 +18,9 @@ export function createLogger(
 ): Logger {
   const emit = (at: LogLevel, msg: string, fields?: Record<string, unknown>) => {
     if (ORDER[at] < ORDER[level]) return;
-    write(JSON.stringify({ time: new Date().toISOString(), level: at, msg, ...fields }));
+    const base = { time: new Date().toISOString(), level: at, msg };
+    // Caller fields can't overwrite the base keys; their order stays first.
+    write(JSON.stringify(Object.assign({ ...base }, fields, base)));
   };
   return {
     debug: (msg, fields) => emit('debug', msg, fields),
