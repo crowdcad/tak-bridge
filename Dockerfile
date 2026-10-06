@@ -11,7 +11,8 @@ RUN npm run build
 FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+# mkdir: with no runtime dependencies, npm creates no node_modules for the COPY below.
+RUN npm ci --omit=dev && mkdir -p node_modules
 
 FROM node:24-alpine
 WORKDIR /app
