@@ -21,7 +21,8 @@
     "test": "vitest run --project unit",
     "sim": "node dist/sim/cli.js",
     "dev-certs": "node dist/testing/certs.js",
-    "test:emulator": "firebase emulators:exec --only firestore,auth --project demo-crowdcad --config test/firebase.json \"vitest run --project emulator\""
+    "test:emulator": "firebase emulators:exec --only firestore,auth --project demo-crowdcad --config test/firebase.json \"vitest run --project emulator\"",
+    "test:pocketbase": "vitest run --project pocketbase"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

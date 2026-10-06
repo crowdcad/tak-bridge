@@ -60,3 +60,31 @@ jobs:
       - run: npm run test:emulator
         env:
           CROWDCAD_CORE_DIR: ${{ github.workspace }}/core-checkout
+
+  pocketbase:
+    name: PocketBase rules and adapter tests
+    runs-on: ubuntu-latest
+    env:
+      POCKETBASE_VERSION: '0.36.7'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out crowdcad/crowdcad (PocketBase setup script)
+        uses: actions/checkout@v4
+        with:
+          repository: crowdcad/crowdcad
+          ref: integration/tak
+          path: core-checkout
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Download PocketBase
+        run: |
+          curl -fsSL "https://github.com/pocketbase/pocketbase/releases/download/v${POCKETBASE_VERSION}/pocketbase_${POCKETBASE_VERSION}_linux_amd64.zip" -o pb.zip
+          unzip -o pb.zip pocketbase -d "$RUNNER_TEMP"
+          chmod +x "$RUNNER_TEMP/pocketbase"
+      - run: npm run test:pocketbase
+        env:
+          POCKETBASE_BIN: ${{ runner.temp }}/pocketbase
+          CROWDCAD_CORE_DIR: ${{ github.workspace }}/core-checkout
