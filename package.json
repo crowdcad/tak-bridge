@@ -18,9 +18,10 @@
     "start": "node dist/index.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --project unit",
     "sim": "node dist/sim/cli.js",
-    "dev-certs": "node dist/testing/certs.js"
+    "dev-certs": "node dist/testing/certs.js",
+    "test:emulator": "firebase emulators:exec --only firestore,auth --project demo-crowdcad --config test/firebase.json \"vitest run --project emulator\""
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

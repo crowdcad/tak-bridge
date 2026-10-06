@@ -8,3 +8,4 @@ certs/
 *.pem
 *.key
 *.zip
+core-checkout/
