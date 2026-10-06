@@ -9,3 +9,4 @@ certs/
 *.key
 *.zip
 core-checkout/
+*-debug.log
