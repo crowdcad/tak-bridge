@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { CotFramer } from './framing.js';
 import { buildPositionCot } from './xml.js';
 
-const a = buildPositionCot({ uid: 'A', callsign: 'Team 1', lat: 37.87, lon: -122.27, time: 0 });
-const b = buildPositionCot({ uid: 'B', callsign: 'Team 2', lat: 37.88, lon: -122.26, time: 1000 });
+const a = buildPositionCot({ uid: 'A', callsign: 'Team 1', lat: 45.001, lon: -100.002, time: 0 });
+const b = buildPositionCot({ uid: 'B', callsign: 'Team 2', lat: 45.002, lon: -100.001, time: 1000 });
 const strip = (s: string) => s.replace(/^<\?xml[^>]*\?>/, '');
 
 describe('CotFramer', () => {

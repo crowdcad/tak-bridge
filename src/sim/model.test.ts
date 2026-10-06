@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { Simulation } from './model.js';
 
-const center = { lat: 37.8715, lon: -122.273 };
+const center = { lat: 45.0012, lon: -100.0021 };
 const start = Date.parse('2026-10-07T08:00:00Z');
 const HOUR = 3_600_000;
 

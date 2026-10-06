@@ -16,7 +16,7 @@ import { FirebaseAdapter } from './firebase.js';
  */
 const PROJECT = 'demo-crowdcad';
 const log = createLogger('error', () => {});
-const center = { lat: 37.8715, lon: -122.273 };
+const center = { lat: 45.0012, lon: -100.0021 };
 
 let env: RulesTestEnvironment;
 let bridgeUid: string;

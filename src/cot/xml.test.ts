@@ -10,8 +10,8 @@ describe('parseCot', () => {
     const xml = buildPositionCot({
       uid: 'ANDROID-123',
       callsign: 'Medic 1 & Co',
-      lat: 37.8715,
-      lon: -122.273,
+      lat: 45.0012,
+      lon: -100.0021,
       hae: 52,
       ce: 4.5,
       course: 90,
@@ -25,8 +25,8 @@ describe('parseCot', () => {
         deviceUid: 'ANDROID-123',
         callsign: 'Medic 1 & Co',
         cotType: 'a-f-G-U-C',
-        lat: 37.8715,
-        lon: -122.273,
+        lat: 45.0012,
+        lon: -100.0021,
         hae: 52,
         ce: 4.5,
         course: 90,
@@ -53,7 +53,7 @@ describe('parseCot', () => {
     ['delete task', 't-x-d-d'],
     ['ping reply', 't-x-c-t-r'],
   ])('ignores a %s even when it carries a point', (_name, type) => {
-    const parsed = parseCot(buildOtherCot({ uid: 'u', type, lat: 37.87, lon: -122.27, time: t }));
+    const parsed = parseCot(buildOtherCot({ uid: 'u', type, lat: 45.001, lon: -100.002, time: t }));
     expect(parsed).toMatchObject({ kind: 'ignored', type });
   });
 

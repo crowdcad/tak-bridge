@@ -14,7 +14,7 @@ import type { DevicePosition } from './types.js';
 
 const withOpenssl = hasOpenssl() ? describe : describe.skip;
 const log = createLogger('error', () => {});
-const center = { lat: 37.8715, lon: -122.273 };
+const center = { lat: 45.0012, lon: -100.0021 };
 
 async function waitFor(cond: () => boolean, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

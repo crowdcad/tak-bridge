@@ -46,8 +46,8 @@ const anon = () => env.unauthenticatedContext().firestore() as unknown as Firest
 
 const now = 1_760_000_000_000;
 const live = (over: Record<string, unknown> = {}) => ({
-  lat: 37.87,
-  lon: -122.27,
+  lat: 45.001,
+  lon: -100.002,
   ce: 5,
   callsign: 'Team 1',
   cotType: 'a-f-G-U-C',

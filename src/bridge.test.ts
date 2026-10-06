@@ -9,7 +9,7 @@ import type { DevicePosition } from './sources/types.js';
 import { MemoryAdapter } from './testing/memory-adapter.js';
 
 const log = createLogger('error', () => {});
-const center = { lat: 37.8715, lon: -122.273 };
+const center = { lat: 45.0012, lon: -100.0021 };
 const T0 = Date.parse('2026-10-07T08:00:00Z');
 
 const cfg = (eventId: string, over: Partial<TakEventConfig> = {}): TakEventConfig => ({

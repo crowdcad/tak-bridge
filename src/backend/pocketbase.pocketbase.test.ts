@@ -15,7 +15,7 @@ import { PocketBaseAdapter } from './pocketbase.js';
 const withPocketBase = pocketbaseAvailable() ? describe : describe.skip;
 const log = createLogger('error', () => {});
 const PW = 'test-password-123';
-const center = { lat: 37.8715, lon: -122.273 };
+const center = { lat: 45.0012, lon: -100.0021 };
 
 withPocketBase('PocketBase TAK rules and adapter', () => {
   let pb: LocalPocketBase;
@@ -71,8 +71,8 @@ withPocketBase('PocketBase TAK rules and adapter', () => {
     event: eventIds[event],
     bridge,
     deviceUid: 'DEV1',
-    lat: 37.87,
-    lon: -122.27,
+    lat: 45.001,
+    lon: -100.002,
     deviceTime: 1,
     receivedAt: 1,
     ...over,
