@@ -8,7 +8,7 @@
  * never include their values, since several of them are secrets.
  */
 
-export type BackendKind = 'firebase' | 'pocketbase';
+export type BackendKind = 'firebase' | 'pocketbase' | 'none';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface TakConfig {
@@ -20,17 +20,20 @@ export interface TakConfig {
   /** Path to the bridge user's client certificate bundle (.p12). */
   clientP12Path: string;
   clientP12Password: string;
-  /** Path to the TAK Server CA: a PEM file or a truststore .p12. */
-  caPath: string;
-  /** Only needed when caPath is a .p12. */
-  caP12Password?: string;
+  /**
+   * Path to the TAK Server CA as PEM. Optional: when unset, the CA certificates
+   * bundled in the client .p12 are trusted.
+   */
+  caPath?: string;
   /** Optional TLS server name override, when the certificate name differs from host. */
   serverName?: string;
 }
 
 export type BackendConfig =
   | { kind: 'firebase'; apiKey: string; projectId: string; authDomain: string }
-  | { kind: 'pocketbase'; url: string };
+  | { kind: 'pocketbase'; url: string }
+  /** Log positions only and write nothing. For setup checks and diagnostics. */
+  | { kind: 'none' };
 
 export interface BridgeConfig {
   tak: TakConfig;
@@ -79,8 +82,7 @@ export function loadConfig(env: Env = process.env): BridgeConfig {
     apiPort: port('TAK_API_PORT', 8443),
     clientP12Path: str('TAK_CLIENT_P12', '/certs/client.p12'),
     clientP12Password: str('TAK_CLIENT_P12_PASSWORD'),
-    caPath: str('TAK_CA', '/certs/ca.pem'),
-    caP12Password: optional('TAK_CA_P12_PASSWORD'),
+    caPath: optional('TAK_CA'),
     serverName: optional('TAK_SERVER_NAME'),
   };
 
@@ -95,8 +97,10 @@ export function loadConfig(env: Env = process.env): BridgeConfig {
     };
   } else if (backendName === 'pocketbase') {
     backend = { kind: 'pocketbase', url: str('POCKETBASE_URL') };
+  } else if (backendName === 'none') {
+    backend = { kind: 'none' };
   } else {
-    problems.push('CROWDCAD_BACKEND must be "firebase" or "pocketbase"');
+    problems.push('CROWDCAD_BACKEND must be "firebase", "pocketbase" or "none"');
     backend = { kind: 'firebase', apiKey: '', projectId: '', authDomain: '' };
   }
 
@@ -104,11 +108,12 @@ export function loadConfig(env: Env = process.env): BridgeConfig {
   const logLevel = LOG_LEVELS.find((l) => l === levelName);
   if (!logLevel) problems.push(`LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}`);
 
+  const needsAccount = backend.kind !== 'none';
   const config: BridgeConfig = {
     tak,
     backend,
-    bridgeEmail: str('BRIDGE_EMAIL'),
-    bridgePassword: str('BRIDGE_PASSWORD'),
+    bridgeEmail: needsAccount ? str('BRIDGE_EMAIL') : (optional('BRIDGE_EMAIL') ?? ''),
+    bridgePassword: needsAccount ? str('BRIDGE_PASSWORD') : (optional('BRIDGE_PASSWORD') ?? ''),
     logLevel: logLevel ?? 'info',
   };
 
@@ -122,10 +127,14 @@ export function describeConfig(config: BridgeConfig): Record<string, unknown> {
     takHost: config.tak.host,
     takStreamPort: config.tak.streamPort,
     takClientP12: config.tak.clientP12Path,
-    takCa: config.tak.caPath,
+    takCa: config.tak.caPath ?? '(from client .p12)',
     backend: config.backend.kind,
     backendTarget:
-      config.backend.kind === 'firebase' ? config.backend.projectId : config.backend.url,
+      config.backend.kind === 'firebase'
+        ? config.backend.projectId
+        : config.backend.kind === 'pocketbase'
+          ? config.backend.url
+          : '(none: log only)',
     bridgeEmail: config.bridgeEmail,
     logLevel: config.logLevel,
   };

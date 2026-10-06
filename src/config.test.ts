@@ -35,7 +35,7 @@ describe('loadConfig', () => {
     expect(config.tak.streamPort).toBe(8089);
     expect(config.tak.apiPort).toBe(8443);
     expect(config.tak.clientP12Path).toBe('/certs/client.p12');
-    expect(config.tak.caPath).toBe('/certs/ca.pem');
+    expect(config.tak.caPath).toBeUndefined();
     expect(config.logLevel).toBe('info');
   });
 
@@ -49,6 +49,12 @@ describe('loadConfig', () => {
       BRIDGE_PASSWORD: 'y',
     });
     expect(config.backend).toEqual({ kind: 'pocketbase', url: 'http://pocketbase:8090' });
+  });
+
+  it('allows a log-only config with no backend or bridge account', () => {
+    const config = loadConfig({ TAK_HOST: 'tak.example.org', TAK_CLIENT_P12_PASSWORD: 'x', CROWDCAD_BACKEND: 'none' });
+    expect(config.backend).toEqual({ kind: 'none' });
+    expect(config.bridgeEmail).toBe('');
   });
 
   it('reports every missing variable at once', () => {
@@ -73,7 +79,7 @@ describe('loadConfig', () => {
       LOG_LEVEL: 'loud',
     });
     expect(problems).toContain('TAK_STREAM_PORT must be a port number (1-65535)');
-    expect(problems).toContain('CROWDCAD_BACKEND must be "firebase" or "pocketbase"');
+    expect(problems).toContain('CROWDCAD_BACKEND must be "firebase", "pocketbase" or "none"');
     expect(problems).toContain('LOG_LEVEL must be one of debug, info, warn, error');
   });
 
