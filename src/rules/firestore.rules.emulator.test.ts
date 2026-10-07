@@ -201,6 +201,22 @@ describe('bridge account: live, history and status writes', () => {
     await assertSucceeds(setDoc(doc(as('bridge'), 'events/E5/takHistory/SEG1/points/0'), { points: [] }));
   });
 
+  it('may finish history after close, but not when the config is disabled', async () => {
+    const seg = { bridgeUid: 'BR', deviceUid: 'DEV1', teamId: 't1', endedAt: now };
+    await assertSucceeds(setDoc(doc(as('bridge'), 'events/E3/takHistory/SEGC'), seg)); // E3 is closed
+    await env.withSecurityRulesDisabled((ctx) => updateDoc(doc(ctx.firestore(), 'events/E1/takConfig/current'), { enabled: false }));
+    await assertFails(setDoc(doc(as('bridge'), 'events/E1/takHistory/SEGD'), seg));
+  });
+
+  it('reads call state (opaque team ids) but cannot write it', async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      setDoc(doc(ctx.firestore(), 'events/E1/takCallState/current'), { teamIdsOnCall: ['t1'], updatedAt: now }),
+    );
+    await assertSucceeds(getDoc(doc(as('bridge'), 'events/E1/takCallState/current')));
+    await assertFails(setDoc(doc(as('bridge'), 'events/E1/takCallState/current'), { teamIdsOnCall: [], updatedAt: now }));
+    await assertFails(getDoc(doc(as('otherBridge'), 'events/E1/takCallState/current')));
+  });
+
   it('writes its own status only', async () => {
     const status = { lastSeenAt: now, takConnected: true, version: '0', linkedEventCount: 1 };
     await assertSucceeds(setDoc(doc(as('bridge'), 'bridgeAccounts/BR/status/current'), status));
@@ -278,6 +294,14 @@ describe('dispatchers and viewers', () => {
     await assertFails(setDoc(doc(as('shared'), 'events/E1/takDeviceLinks/DEV3'), link('OWN')));
     await assertFails(setDoc(doc(as('stranger'), 'events/E1/takDeviceLinks/DEV4'), link('STR')));
     await assertFails(setDoc(doc(as('owner'), 'events/E1/takLive/DEV9'), live({ bridgeUid: 'OWN' })));
+  });
+
+  it('dispatchers publish call state as opaque ids only', async () => {
+    await assertSucceeds(setDoc(doc(as('shared'), 'events/E1/takCallState/current'), { teamIdsOnCall: ['t1', 't2'], updatedAt: now }));
+    await assertFails(
+      setDoc(doc(as('shared'), 'events/E1/takCallState/current'), { teamIdsOnCall: ['t1'], updatedAt: now, chiefComplaint: 'x' }),
+    );
+    await assertFails(setDoc(doc(as('stranger'), 'events/E1/takCallState/current'), { teamIdsOnCall: [], updatedAt: now }));
   });
 
   it('map alignment: readers read, only the owner writes', async () => {

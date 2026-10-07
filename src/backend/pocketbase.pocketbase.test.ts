@@ -111,6 +111,20 @@ withPocketBase('PocketBase TAK rules and adapter', () => {
     });
   });
 
+  describe('history after close and call state', () => {
+    it('lets the bridge finish history on a closed event', async () => {
+      await as.BR!.collection('tak_history').create({ event: eventIds.E3, bridge: ids.BR, segmentId: 'SC', windows: [], endedAt: 5 });
+    });
+
+    it('dispatchers publish call state; the bridge reads but cannot write it', async () => {
+      await as.SH!.collection('tak_call_state').create({ event: eventIds.E1, teamIdsOnCall: ['t1'], updatedAt: 1 });
+      const seen = await as.BR!.collection('tak_call_state').getFullList({ filter: `event = "${eventIds.E1}"` });
+      expect(seen[0]!.teamIdsOnCall).toEqual(['t1']);
+      await rejects(as.BR!.collection('tak_call_state').update(seen[0]!.id, { teamIdsOnCall: [] }));
+      await rejects(as.BR!.collection('tak_call_state').create({ event: eventIds.E5, teamIdsOnCall: [], updatedAt: 1 }));
+    });
+  });
+
   describe('admins, owners and dispatchers', () => {
     it('only admins create bridge records; allowed users see theirs', async () => {
       await rejects(as.OWN!.collection('tak_bridges').create({ bridgeUser: ids.STR, label: 'x', createdBy: ids.OWN, allowedUsers: [] }));
