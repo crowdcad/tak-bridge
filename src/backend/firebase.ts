@@ -17,6 +17,7 @@ import {
   writeBatch,
   type Firestore,
 } from 'firebase/firestore';
+import type { HistorySegmentDoc, PointsChunk } from '../history/recorder.js';
 import type { DevicePosition } from '../sources/types.js';
 import { deviceDocId, deviceUidFromDocId } from './ids.js';
 import {
@@ -141,6 +142,29 @@ export class FirebaseAdapter implements BackendAdapter {
   async listStaleLiveDevices(eventId: string, olderThan: number): Promise<string[]> {
     const snap = await getDocs(query(collection(this.db, 'events', eventId, 'takLive'), where('receivedAt', '<', olderThan)));
     return snap.docs.map((d) => deviceUidFromDocId(d.id));
+  }
+
+  watchCallState(eventId: string, onChange: (teamIds: string[]) => void, onError: (err: Error) => void): Unsubscribe {
+    return onSnapshot(
+      doc(this.db, 'events', eventId, 'takCallState', 'current'),
+      (snap) => {
+        const ids = snap.data()?.teamIdsOnCall;
+        onChange(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : []);
+      },
+      onError,
+    );
+  }
+
+  async writeHistorySegment(eventId: string, segment: HistorySegmentDoc): Promise<void> {
+    const { segmentId, ...fields } = segment;
+    await setDoc(doc(this.db, 'events', eventId, 'takHistory', encodeURIComponent(segmentId)), { ...fields, bridgeUid: this.uid });
+  }
+
+  async writeHistoryPoints(eventId: string, chunk: PointsChunk): Promise<void> {
+    await setDoc(
+      doc(this.db, 'events', eventId, 'takHistory', encodeURIComponent(chunk.segmentId), 'points', String(chunk.chunk)),
+      { points: chunk.points },
+    );
   }
 
   async writeBridgeStatus(status: BridgeStatus): Promise<void> {

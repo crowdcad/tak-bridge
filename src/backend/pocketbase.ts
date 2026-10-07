@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import PocketBase, { ClientResponseError, type RecordModel } from 'pocketbase';
+import type { HistorySegmentDoc, PointsChunk } from '../history/recorder.js';
 import type { DevicePosition } from '../sources/types.js';
 import {
   liveDoc,
@@ -132,6 +133,42 @@ export class PocketBaseAdapter implements BackendAdapter {
       fields: 'deviceUid',
     });
     return records.map((r) => r.deviceUid as string);
+  }
+
+  watchCallState(eventId: string, onChange: (teamIds: string[]) => void, onError: (err: Error) => void): Unsubscribe {
+    return this.poll(
+      async () => {
+        const records = await this.pb
+          .collection('tak_call_state')
+          .getFullList({ filter: this.pb.filter('event = {:eventId}', { eventId }) });
+        const ids = records[0]?.teamIdsOnCall;
+        return Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : [];
+      },
+      onChange,
+      onError,
+    );
+  }
+
+  async writeHistorySegment(eventId: string, segment: HistorySegmentDoc): Promise<void> {
+    const { segmentId, endedAt, ...fields } = segment;
+    await this.upsert(
+      'tak_history',
+      segmentId,
+      this.pb.filter('segmentId = {:segmentId}', { segmentId }),
+      { event: eventId, bridge: this.uid, segmentId },
+      // PocketBase number fields can't hold null: 0 means the segment is still open.
+      { ...fields, endedAt: endedAt ?? 0 },
+    );
+  }
+
+  async writeHistoryPoints(eventId: string, chunk: PointsChunk): Promise<void> {
+    await this.upsert(
+      'tak_history_points',
+      `${chunk.segmentId}#${chunk.chunk}`,
+      this.pb.filter('segmentId = {:segmentId} && chunk = {:chunk}', { segmentId: chunk.segmentId, chunk: chunk.chunk }),
+      { event: eventId, bridge: this.uid, segmentId: chunk.segmentId, chunk: chunk.chunk },
+      { points: chunk.points },
+    );
   }
 
   async writeBridgeStatus(status: BridgeStatus): Promise<void> {

@@ -171,3 +171,77 @@ describe('Bridge', () => {
     await bridge.stop();
   });
 });
+
+describe('Bridge history', () => {
+  const link = (deviceUid: string, teamId: string) => ({ deviceUid, teamId, linkedAt: 1, method: 'manual' as const });
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it('records linked devices only and writes segments when flushed', async () => {
+    const { adapter, bridge, setClock } = setup([cfg('E1', { historyMode: 'summary' })]);
+    await bridge.start('e', 'p');
+    await tick();
+    adapter.setLinks('E1', [link('D1', 'team-1')]);
+    for (let i = 0; i < 10; i++) {
+      setClock(T0 + i * 10_000);
+      bridge.handlePosition(pos('D1', center.lat, center.lon, T0 + i * 10_000));
+      bridge.handlePosition(pos('D2', center.lat, center.lon, T0 + i * 10_000)); // not linked
+    }
+    await bridge.flushHistory(false);
+    const segs = [...adapter.history.get('E1')!.values()];
+    expect(segs.map((s) => [s.deviceUid, s.teamId, s.endedAt])).toEqual([['D1', 'team-1', null]]);
+    expect(segs[0]!.windows[0]!.secs).toBe(90);
+    await bridge.stop();
+  });
+
+  it('records nothing in Off mode', async () => {
+    const { adapter, bridge } = setup([cfg('E1', { historyMode: 'off' })]);
+    await bridge.start('e', 'p');
+    await tick();
+    adapter.setLinks('E1', [link('D1', 'team-1')]);
+    bridge.handlePosition(pos('D1', center.lat, center.lon, T0));
+    await bridge.flushHistory(true);
+    expect(adapter.counts.historyWrites).toBe(0);
+    await bridge.stop();
+  });
+
+  it('ends and writes segments when the event closes', async () => {
+    const { adapter, bridge, setClock } = setup([cfg('E1', { historyMode: 'summary' })]);
+    await bridge.start('e', 'p');
+    await tick();
+    adapter.setLinks('E1', [link('D1', 'team-1')]);
+    for (let i = 0; i < 3; i++) {
+      setClock(T0 + i * 10_000);
+      bridge.handlePosition(pos('D1', center.lat, center.lon, T0 + i * 10_000));
+    }
+    adapter.setConfigs([cfg('E1', { historyMode: 'summary', closed: true })]);
+    await bridge.flush();
+    const seg = [...adapter.history.get('E1')!.values()][0]!;
+    expect(seg.endedAt).toBe(T0 + 20_000);
+    expect(adapter.live.get('E1')!.size).toBe(0);
+    await bridge.stop();
+  });
+
+  it('keeps Detailed points only while the team is on a call', async () => {
+    const { adapter, bridge, setClock } = setup([cfg('E1', { historyMode: 'detailed' })]);
+    await bridge.start('e', 'p');
+    await tick();
+    adapter.setLinks('E1', [link('D1', 'team-1')]);
+    const feed = (from: number, to: number) => {
+      for (let t = from; t < to; t += 5_000) {
+        setClock(T0 + t);
+        bridge.handlePosition(pos('D1', center.lat, center.lon, T0 + t));
+      }
+    };
+    feed(0, 60_000);
+    adapter.setCallState('E1', ['team-1']);
+    feed(60_000, 120_000); // 4 points at 15 s spacing
+    adapter.setCallState('E1', []);
+    feed(120_000, 180_000);
+    adapter.setConfigs([cfg('E1', { historyMode: 'detailed', closed: true })]);
+    await bridge.flush();
+    const points = adapter.points.flatMap((p) => p.chunk.points);
+    expect(points).toHaveLength(4);
+    expect(points.every((p) => p.t >= T0 + 60_000 && p.t < T0 + 120_000)).toBe(true);
+    await bridge.stop();
+  });
+});

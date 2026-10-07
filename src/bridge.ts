@@ -2,6 +2,7 @@
 
 import type { BackendAdapter, TakEventConfig, Unsubscribe } from './backend/types.js';
 import { haversineM } from './geo.js';
+import { HistoryRecorder } from './history/recorder.js';
 import type { Logger } from './log.js';
 import type { DevicePosition } from './sources/types.js';
 
@@ -20,6 +21,8 @@ export interface BridgeOptions {
   statusIntervalMs?: number;
   /** At startup, live docs older than this are deleted. */
   staleAfterMs?: number;
+  /** How often history segments are written. */
+  historyFlushMs?: number;
 }
 
 interface LastWrite {
@@ -32,6 +35,10 @@ interface EventState {
   config: TakEventConfig;
   lastWrite: Map<string, LastWrite>;
   closing: boolean;
+  /** Location history, when the event records it. */
+  recorder: HistoryRecorder | null;
+  unwatchLinks: Unsubscribe | null;
+  unwatchCalls: Unsubscribe | null;
 }
 
 /**
@@ -51,13 +58,14 @@ export class Bridge {
   private readonly seen = new Set<string>();
   private unsubscribe: Unsubscribe | null = null;
   private statusTimer: NodeJS.Timeout | null = null;
+  private historyTimer: NodeJS.Timeout | null = null;
   private readonly opts: Required<Omit<BridgeOptions, 'adapter' | 'log' | 'takConnected'>> &
     Pick<BridgeOptions, 'adapter' | 'log' | 'takConnected'>;
   /** In-flight live writes, and other in-flight work (sweeps, closes). Kept apart so a close can wait for writes without waiting for itself. */
   private readonly writes = new Set<Promise<unknown>>();
   private readonly ops = new Set<Promise<unknown>>();
 
-  readonly stats = { liveWrites: 0, skipped: 0, writeErrors: 0 };
+  readonly stats = { liveWrites: 0, skipped: 0, writeErrors: 0, historyWrites: 0 };
 
   constructor(options: BridgeOptions) {
     this.opts = {
@@ -66,6 +74,7 @@ export class Bridge {
       heartbeatMs: 60_000,
       statusIntervalMs: 60_000,
       staleAfterMs: 10 * 60_000,
+      historyFlushMs: 5 * 60_000,
       ...options,
     };
   }
@@ -94,16 +103,84 @@ export class Bridge {
       );
     });
     this.statusTimer = setInterval(() => void this.writeStatus(), this.opts.statusIntervalMs);
+    this.historyTimer = setInterval(() => void this.flushHistory(false), this.opts.historyFlushMs);
     await this.writeStatus();
     return uid;
   }
 
   async stop(): Promise<void> {
     if (this.statusTimer) clearInterval(this.statusTimer);
-    this.statusTimer = null;
+    if (this.historyTimer) clearInterval(this.historyTimer);
+    this.statusTimer = this.historyTimer = null;
     this.unsubscribe?.();
     this.unsubscribe = null;
     await this.flush();
+    // Keep what was recorded; segments stay open so a restart continues them as new segments.
+    await this.flushHistory(false);
+    for (const state of this.events.values()) this.unwatch(state);
+  }
+
+  /** Writes changed history segments and full point chunks for every event. */
+  async flushHistory(final: boolean): Promise<void> {
+    const work: Promise<unknown>[] = [];
+    for (const [eventId, state] of this.events) {
+      if (!state.recorder) continue;
+      const { segments, points } = state.recorder.flush(final);
+      for (const seg of segments) work.push(this.writeHistory(() => this.opts.adapter.writeHistorySegment(eventId, seg), eventId));
+      for (const chunk of points) work.push(this.writeHistory(() => this.opts.adapter.writeHistoryPoints(eventId, chunk), eventId));
+    }
+    await Promise.allSettled(work);
+  }
+
+  private async writeHistory(write: () => Promise<void>, eventId: string): Promise<void> {
+    try {
+      await write();
+      this.stats.historyWrites++;
+    } catch (err) {
+      this.stats.writeErrors++;
+      this.opts.log.warn('history write failed', { eventId, message: (err as Error).message });
+    }
+  }
+
+  /** Starts, updates or stops history recording to match an event's config. */
+  private syncHistory(eventId: string, state: EventState): void {
+    const { historyMode, enabled, closed } = state.config;
+    const wanted = enabled && !closed && historyMode !== 'off';
+    if (!wanted) {
+      if (state.recorder && historyMode === 'off') state.recorder.setMode('off');
+      if (state.unwatchCalls && historyMode !== 'detailed') {
+        state.unwatchCalls();
+        state.unwatchCalls = null;
+      }
+      return;
+    }
+    if (!state.recorder) state.recorder = new HistoryRecorder(historyMode);
+    else state.recorder.setMode(historyMode);
+    const recorder = state.recorder;
+    if (!state.unwatchLinks) {
+      state.unwatchLinks = this.opts.adapter.watchDeviceLinks(
+        eventId,
+        (links) => recorder.setLinks(new Map(links.map((l) => [l.deviceUid, l.teamId]))),
+        (err) => this.opts.log.warn('watching device links failed', { eventId, message: err.message }),
+      );
+    }
+    if (historyMode === 'detailed' && !state.unwatchCalls) {
+      state.unwatchCalls = this.opts.adapter.watchCallState(
+        eventId,
+        (ids) => recorder.setOnCall(ids),
+        (err) => this.opts.log.warn('watching call state failed', { eventId, message: err.message }),
+      );
+    } else if (historyMode !== 'detailed' && state.unwatchCalls) {
+      state.unwatchCalls();
+      state.unwatchCalls = null;
+      recorder.setOnCall([]);
+    }
+  }
+
+  private unwatch(state: EventState): void {
+    state.unwatchLinks?.();
+    state.unwatchCalls?.();
+    state.unwatchLinks = state.unwatchCalls = null;
   }
 
   /** Waits for all in-flight writes and work. */
@@ -124,6 +201,7 @@ export class Bridge {
     for (const [eventId, state] of this.events) {
       const { config } = state;
       if (!config.enabled || config.closed || state.closing) continue;
+      state.recorder?.add(position);
       const last = state.lastWrite.get(position.deviceUid);
       const due =
         !last ||
@@ -155,7 +233,9 @@ export class Bridge {
     const current = new Set(configs.map((c) => c.eventId));
     for (const eventId of [...this.events.keys()]) {
       if (!current.has(eventId)) {
-        // Unlinked: stop writing. The owner's browser clears live docs on unlink.
+        // Unlinked: stop writing (the rules no longer allow it). The owner's
+        // browser clears live docs on unlink.
+        this.unwatch(this.events.get(eventId)!);
         this.events.delete(eventId);
         this.opts.log.info('event unlinked', { eventId });
       }
@@ -165,7 +245,17 @@ export class Bridge {
       const state = this.events.get(config.eventId);
       const wasClosed = state?.config.closed ?? false;
       if (state) state.config = config;
-      else this.events.set(config.eventId, { config, lastWrite: new Map(), closing: false });
+      else {
+        this.events.set(config.eventId, {
+          config,
+          lastWrite: new Map(),
+          closing: false,
+          recorder: null,
+          unwatchLinks: null,
+          unwatchCalls: null,
+        });
+      }
+      this.syncHistory(config.eventId, this.events.get(config.eventId)!);
 
       if (!this.seen.has(config.eventId)) {
         this.seen.add(config.eventId);
@@ -198,6 +288,15 @@ export class Bridge {
     const state = this.events.get(eventId);
     if (state) state.closing = true;
     await this.flushWrites();
+    // End open history segments and write everything recorded.
+    if (state?.recorder) {
+      state.recorder.closeAll(null);
+      const { segments, points } = state.recorder.flush(true);
+      for (const seg of segments) await this.writeHistory(() => this.opts.adapter.writeHistorySegment(eventId, seg), eventId);
+      for (const chunk of points) await this.writeHistory(() => this.opts.adapter.writeHistoryPoints(eventId, chunk), eventId);
+      state.recorder = null;
+    }
+    if (state) this.unwatch(state);
     try {
       await this.opts.adapter.deleteLivePositions(eventId);
       this.opts.log.info('event closed; live positions removed', { eventId });

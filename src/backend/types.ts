@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { HistorySegmentDoc, PointsChunk } from '../history/recorder.js';
 import type { DevicePosition } from '../sources/types.js';
 
 /**
@@ -59,9 +60,14 @@ export interface BackendAdapter {
   listStaleLiveDevices(eventId: string, olderThan: number): Promise<string[]>;
   writeBridgeStatus(status: BridgeStatus): Promise<void>;
   writeEventStatus(eventId: string, status: EventStatus): Promise<void>;
+  /** Watches which teams are on a call (opaque ids), published by dispatchers for Detailed history. */
+  watchCallState(eventId: string, onChange: (teamIds: string[]) => void, onError: (err: Error) => void): Unsubscribe;
+  /** Creates or replaces a history segment doc. */
+  writeHistorySegment(eventId: string, segment: HistorySegmentDoc): Promise<void>;
+  /** Writes one chunk of Detailed-mode points for a segment. */
+  writeHistoryPoints(eventId: string, chunk: PointsChunk): Promise<void>;
   /** Signs out and releases connections. */
   close(): Promise<void>;
-  // History writes (segments, windows, grid, detailed points) are added in P5.
 }
 
 /** The fields of a live doc, as the data contract defines them. */

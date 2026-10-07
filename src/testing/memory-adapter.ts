@@ -9,6 +9,7 @@ import type {
   Unsubscribe,
 } from '../backend/types.js';
 import { liveDoc } from '../backend/types.js';
+import type { HistorySegmentDoc, PointsChunk } from '../history/recorder.js';
 import type { DevicePosition } from '../sources/types.js';
 
 /**
@@ -22,7 +23,11 @@ export class MemoryAdapter implements BackendAdapter {
   readonly live = new Map<string, Map<string, Record<string, unknown>>>();
   readonly bridgeStatus: BridgeStatus[] = [];
   readonly eventStatus = new Map<string, EventStatus[]>();
-  readonly counts = { liveWrites: 0, liveDeletes: 0, statusWrites: 0 };
+  readonly counts = { liveWrites: 0, liveDeletes: 0, statusWrites: 0, historyWrites: 0, pointWrites: 0 };
+  /** eventId -> segmentId -> doc */
+  readonly history = new Map<string, Map<string, HistorySegmentDoc>>();
+  readonly points: { eventId: string; chunk: PointsChunk }[] = [];
+  private callListeners = new Map<string, (ids: string[]) => void>();
   /** Events whose writes fail, to simulate rule denials. */
   readonly failingEvents = new Set<string>();
   private listener: ((configs: TakEventConfig[]) => void) | null = null;
@@ -45,9 +50,10 @@ export class MemoryAdapter implements BackendAdapter {
     this.listener?.(configs.map((c) => ({ ...c })));
   }
 
-  watchDeviceLinks(_eventId: string, onChange: (links: DeviceLink[]) => void): Unsubscribe {
+  watchDeviceLinks(eventId: string, onChange: (links: DeviceLink[]) => void): Unsubscribe {
+    this.linkListeners.set(eventId, onChange);
     queueMicrotask(() => onChange([]));
-    return () => {};
+    return () => this.linkListeners.delete(eventId);
   }
 
   async writeLivePosition(eventId: string, position: DevicePosition): Promise<void> {
@@ -68,6 +74,34 @@ export class MemoryAdapter implements BackendAdapter {
   async listStaleLiveDevices(eventId: string, olderThan: number): Promise<string[]> {
     const docs = this.live.get(eventId) ?? new Map();
     return [...docs.entries()].filter(([, d]) => (d.receivedAt as number) < olderThan).map(([id]) => id);
+  }
+
+  watchCallState(eventId: string, onChange: (teamIds: string[]) => void): Unsubscribe {
+    this.callListeners.set(eventId, onChange);
+    queueMicrotask(() => onChange([]));
+    return () => this.callListeners.delete(eventId);
+  }
+
+  /** Simulates a dispatcher publishing on-call team ids. */
+  setCallState(eventId: string, ids: string[]): void {
+    this.callListeners.get(eventId)?.(ids);
+  }
+
+  private linkListeners = new Map<string, (links: DeviceLink[]) => void>();
+  /** Simulates dispatchers changing device links. */
+  setLinks(eventId: string, links: DeviceLink[]): void {
+    this.linkListeners.get(eventId)?.(links);
+  }
+
+  async writeHistorySegment(eventId: string, segment: HistorySegmentDoc): Promise<void> {
+    if (!this.history.has(eventId)) this.history.set(eventId, new Map());
+    this.history.get(eventId)!.set(segment.segmentId, segment);
+    this.counts.historyWrites++;
+  }
+
+  async writeHistoryPoints(eventId: string, chunk: PointsChunk): Promise<void> {
+    this.points.push({ eventId, chunk });
+    this.counts.pointWrites++;
   }
 
   async writeBridgeStatus(status: BridgeStatus): Promise<void> {
