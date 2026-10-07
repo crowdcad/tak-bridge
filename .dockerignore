@@ -1,0 +1,13 @@
+node_modules
+dist
+coverage
+.git
+.github
+.env
+certs
+data
+*.p12
+*.pfx
+*.pem
+*.key
+*.zip

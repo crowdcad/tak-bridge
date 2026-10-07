@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: CI
+
+on:
+  push:
+    branches: [main, integration/tak, 'tak/**']
+  pull_request:
+    branches: [main, integration/tak]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint, typecheck, test, build (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t tak-bridge:ci .
+
+  emulator:
+    name: Firestore rules and adapter tests (emulator)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out crowdcad/crowdcad (rules and PocketBase setup)
+        uses: actions/checkout@v4
+        with:
+          repository: crowdcad/crowdcad
+          ref: integration/tak
+          path: core-checkout
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npm install -g firebase-tools@15
+      - run: npm run test:emulator
+        env:
+          CROWDCAD_CORE_DIR: ${{ github.workspace }}/core-checkout
+
+  pocketbase:
+    name: PocketBase rules and adapter tests
+    runs-on: ubuntu-latest
+    env:
+      POCKETBASE_VERSION: '0.36.7'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out crowdcad/crowdcad (PocketBase setup script)
+        uses: actions/checkout@v4
+        with:
+          repository: crowdcad/crowdcad
+          ref: integration/tak
+          path: core-checkout
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Download PocketBase
+        run: |
+          curl -fsSL "https://github.com/pocketbase/pocketbase/releases/download/v${POCKETBASE_VERSION}/pocketbase_${POCKETBASE_VERSION}_linux_amd64.zip" -o pb.zip
+          unzip -o pb.zip pocketbase -d "$RUNNER_TEMP"
+          chmod +x "$RUNNER_TEMP/pocketbase"
+      - run: npm run test:pocketbase
+        env:
+          POCKETBASE_BIN: ${{ runner.temp }}/pocketbase
+          CROWDCAD_CORE_DIR: ${{ github.workspace }}/core-checkout
