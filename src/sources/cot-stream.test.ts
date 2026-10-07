@@ -9,7 +9,7 @@ import { Simulation } from '../sim/model.js';
 import { SimTakServer } from '../sim/server.js';
 import { generateDevCerts, hasOpenssl, type DevCerts } from '../testing/certs.js';
 import { loadTlsIdentity } from '../tls/identity.js';
-import { CotStreamSource } from './cot-stream.js';
+import { CotStreamSource, describeTlsError } from './cot-stream.js';
 import type { DevicePosition } from './types.js';
 
 const withOpenssl = hasOpenssl() ? describe : describe.skip;
@@ -58,7 +58,7 @@ withOpenssl('CotStreamSource against the simulated TAK Server', () => {
     return server.listen();
   }
 
-  function startSource(port: number, p12 = certs.clientP12, caPath?: string) {
+  function startSource(port: number, p12 = certs.clientP12, caPath?: string, serverName?: string) {
     const identity = loadTlsIdentity({
       host: 'localhost',
       streamPort: port,
@@ -66,6 +66,7 @@ withOpenssl('CotStreamSource against the simulated TAK Server', () => {
       clientP12Path: p12,
       clientP12Password: certs.password,
       caPath,
+      serverName,
     });
     const positions: DevicePosition[] = [];
     source = new CotStreamSource({ host: 'localhost', port, identity, log, minBackoffMs: 50, maxBackoffMs: 200 });
@@ -103,6 +104,15 @@ withOpenssl('CotStreamSource against the simulated TAK Server', () => {
     await new Promise((r) => setTimeout(r, 1_000));
     expect(positions).toHaveLength(0);
     expect(source!.isConnected()).toBe(false);
+    expect(source!.lastError).toMatch(/isn't trusted/);
+  });
+
+  it('checks the server name only when TAK_SERVER_NAME is set', async () => {
+    const port = await startServer();
+    const positions = startSource(port, certs.clientP12, undefined, 'takserver'); // the dev server cert is for localhost
+    await new Promise((r) => setTimeout(r, 1_000));
+    expect(positions).toHaveLength(0);
+    expect(source!.lastError).toMatch(/TAK_SERVER_NAME/);
   });
 
   it('reconnects after the server drops the connection', async () => {
@@ -113,5 +123,17 @@ withOpenssl('CotStreamSource against the simulated TAK Server', () => {
     const before = positions.length;
     await waitFor(() => source!.stats.connects >= 2);
     await waitFor(() => positions.length > before + 5);
+  });
+});
+
+describe('describeTlsError', () => {
+  const e = (code: string, message = '') => Object.assign(new Error(message), { code });
+  it('explains common failures in plain words', () => {
+    expect(describeTlsError(e('ECONNREFUSED'))).toMatch(/TAK_STREAM_PORT/);
+    expect(describeTlsError(e('ENOTFOUND'))).toMatch(/DNS/);
+    expect(describeTlsError(e('ERR_TLS_CERT_ALTNAME_INVALID'))).toMatch(/TAK_SERVER_NAME/);
+    expect(describeTlsError(e('UNABLE_TO_VERIFY_LEAF_SIGNATURE'))).toMatch(/isn't trusted/);
+    expect(describeTlsError(e('ERR_SSL_SSLV3_ALERT_BAD_CERTIFICATE', 'sslv3 alert bad certificate'))).toMatch(/rejected the bridge certificate/);
+    expect(describeTlsError(e('EOTHER', 'something else'))).toBe('something else');
   });
 });

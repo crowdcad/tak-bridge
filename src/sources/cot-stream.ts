@@ -46,6 +46,8 @@ export class CotStreamSource implements InboundSource {
 
   /** Counters, for status and tests. */
   readonly stats = { connects: 0, positions: 0, ignored: 0, invalid: 0 };
+  /** The last connection problem, for status; cleared once connected. */
+  lastError = '';
 
   constructor(options: CotStreamOptions) {
     this.opts = {
@@ -80,6 +82,12 @@ export class CotStreamSource implements InboundSource {
     return this.connected;
   }
 
+  /** Switches to a new TLS identity (e.g. a renewed certificate) and reconnects. */
+  updateIdentity(identity: TlsIdentity): void {
+    this.opts.identity = identity;
+    this.socket?.destroy();
+  }
+
   private connect(): void {
     if (this.stopped) return;
     const { host, port, log } = this.opts;
@@ -91,6 +99,7 @@ export class CotStreamSource implements InboundSource {
 
     socket.once('secureConnect', () => {
       this.connected = true;
+      this.lastError = '';
       this.stats.connects++;
       log.info('connected to TAK Server', { host, port });
       this.pingTimer = setInterval(() => socket.write(buildPing(this.opts.uid)), this.opts.pingIntervalMs);
@@ -117,7 +126,8 @@ export class CotStreamSource implements InboundSource {
     });
 
     socket.on('error', (err: NodeJS.ErrnoException) => {
-      log.warn('TAK connection error', { code: err.code, message: err.message });
+      this.lastError = describeTlsError(err);
+      log.warn('TAK connection error', { code: err.code, message: err.message, hint: this.lastError });
     });
 
     socket.on('close', () => {
@@ -148,4 +158,21 @@ export class CotStreamSource implements InboundSource {
     if (this.stableTimer) clearTimeout(this.stableTimer);
     this.pingTimer = this.idleTimer = this.stableTimer = null;
   }
+}
+
+/** A plain-words explanation of a TAK connection error, for logs and the CrowdCAD status checklist. */
+export function describeTlsError(err: NodeJS.ErrnoException): string {
+  const code = err.code ?? '';
+  if (code === 'ECONNREFUSED') return 'Connection refused: check TAK_HOST and TAK_STREAM_PORT (usually 8089).';
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return 'TAK_HOST could not be found (DNS).';
+  if (code === 'ETIMEDOUT') return 'Timed out reaching the TAK Server: check the host, port and any firewall.';
+  if (code === 'ERR_TLS_CERT_ALTNAME_INVALID') return "The server certificate's name doesn't match: set TAK_SERVER_NAME to the name in it, or unset it.";
+  if (/UNABLE_TO_VERIFY|SELF_SIGNED|UNABLE_TO_GET_ISSUER|CERT_UNTRUSTED/.test(code)) {
+    return "The TAK Server's certificate isn't trusted: enroll again, or set TAK_CA to the TAK Server CA (PEM).";
+  }
+  if (/CERT_HAS_EXPIRED/.test(code)) return 'A certificate has expired: re-enroll the bridge (delete the data folder and restart).';
+  if (/alert|handshake|bad certificate|certificate unknown/i.test(err.message)) {
+    return 'The TAK Server rejected the bridge certificate: check the TAK user exists and is enabled, then re-enroll.';
+  }
+  return err.message;
 }

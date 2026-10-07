@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 #
-# Runs the bridge on a TAK Server host. Copy .env.example to .env, fill it in,
-# put the bridge user's certificate bundle in ./certs, then:
-#   docker compose up -d
+# Runs the bridge on a TAK Server host. CrowdCAD's Admin > TAK > "Add TAK
+# server" screen gives you the complete .env and the commands to run. By hand:
+# copy .env.example to .env, fill it in, then:
+#   docker compose up -d --build
 #
 # TAK support is in development. By default this uses a published release
 # image; set TAK_BRIDGE_VERSION to pin one (recommended). To build from
@@ -14,8 +15,14 @@ services:
     build: .
     env_file: .env
     volumes:
+      # The bridge's enrolled TAK certificate, kept across restarts and upgrades.
+      - tak-bridge-data:/data
+      # Only needed when using a .p12 instead of enrollment (TAK_CLIENT_P12).
       - ./certs:/certs:ro
     restart: unless-stopped
     # Uncomment if TAK_HOST should reach a TAK Server published on the host itself:
     # extra_hosts:
     #   - "host.docker.internal:host-gateway"
+
+volumes:
+  tak-bridge-data:

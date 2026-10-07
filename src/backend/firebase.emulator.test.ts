@@ -128,7 +128,7 @@ describe('FirebaseAdapter + Bridge against the emulator', () => {
     expect(other.size).toBe(0);
 
     const status = await admin((db) => getDoc(doc(db, `bridgeAccounts/${bridgeUid}/status/current`)));
-    expect(status.data()).toMatchObject({ takConnected: true, linkedEventCount: 1 });
+    expect(status.data()).toMatchObject({ takConnected: true, linkedEventCount: 1, devicesSeen: 0, lastPositionAt: 0, takError: '' });
     const evStatus = await admin((db) => getDoc(doc(db, 'events/E1/takStatus/current')));
     expect(evStatus.exists()).toBe(true);
   });

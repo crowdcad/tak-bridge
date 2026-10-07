@@ -214,6 +214,10 @@ withPocketBase('PocketBase TAK rules and adapter', () => {
       expect(e5[0]!.bridge).toBe(ids.BR);
       expect(await pb.admin.collection('tak_live').getFullList({ filter: `event = "${eventIds.E3}"` })).toHaveLength(0);
       expect((await pb.admin.collection('tak_bridge_status').getFullList()).length).toBe(1);
+      await (bridge as unknown as { writeStatus(): Promise<void> }).writeStatus();
+      const status = await pb.admin.collection('tak_bridge_status').getFirstListItem(`bridge = "${ids.BR}"`);
+      expect(status).toMatchObject({ takConnected: true, devicesSeen: 3, takError: '' });
+      expect(status.lastPositionAt).toBeGreaterThan(0);
 
       const cfg = await pb.admin.collection('tak_event_config').getFirstListItem(`event = "${eventIds.E5}"`);
       await pb.admin.collection('tak_event_config').update(cfg.id, { closed: true });

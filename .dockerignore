@@ -5,6 +5,7 @@ coverage
 .github
 .env
 certs
+data
 *.p12
 *.pfx
 *.pem

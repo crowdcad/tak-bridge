@@ -13,6 +13,9 @@ const firebaseEnv = {
   BRIDGE_PASSWORD: 'bridge-secret',
 };
 
+const without = (env: Record<string, string>, ...keys: string[]) =>
+  Object.fromEntries(Object.entries(env).filter(([k]) => !keys.includes(k)));
+
 function problemsOf(env: Record<string, string>): string[] {
   try {
     loadConfig(env);
@@ -61,7 +64,7 @@ describe('loadConfig', () => {
     expect(problemsOf({})).toEqual(
       expect.arrayContaining([
         'TAK_HOST is required',
-        'TAK_CLIENT_P12_PASSWORD is required',
+        expect.stringMatching(/^Set TAK_USERNAME and TAK_PASSWORD .* or TAK_CLIENT_P12/),
         'FIREBASE_API_KEY is required',
         'FIREBASE_PROJECT_ID is required',
         'FIREBASE_AUTH_DOMAIN is required',
@@ -69,6 +72,40 @@ describe('loadConfig', () => {
         'BRIDGE_PASSWORD is required',
       ]),
     );
+  });
+
+  it('enrolls with TAK_USERNAME and TAK_PASSWORD, needing no .p12', () => {
+    const rest = without(firebaseEnv, 'TAK_CLIENT_P12_PASSWORD');
+    const config = loadConfig({ ...rest, TAK_USERNAME: 'crowdcad-bridge', TAK_PASSWORD: 'tak-secret' });
+    expect(config.tak.enroll).toEqual({ host: 'tak.example.org', port: 8446, username: 'crowdcad-bridge', password: 'tak-secret' });
+    expect(config.tak.clientP12Path).toBeUndefined();
+    expect(config.dataDir).toBe('./data');
+  });
+
+  it('takes host, username and token from an Enroll QR link', () => {
+    const rest = without(firebaseEnv, 'TAK_HOST', 'TAK_CLIENT_P12_PASSWORD');
+    const config = loadConfig({
+      ...rest,
+      TAK_ENROLL_URL: 'tak://com.atakmap.app/enroll?host=takserver.example.org&username=bridge&token=tok-secret',
+      TAK_ENROLL_PORT: '9446',
+      BRIDGE_DATA_DIR: '/data',
+    });
+    expect(config.tak.host).toBe('takserver.example.org');
+    expect(config.tak.enroll).toEqual({ host: 'takserver.example.org', port: 9446, username: 'bridge', password: 'tok-secret' });
+    expect(config.dataDir).toBe('/data');
+    expect(problemsOf({ ...rest, TAK_ENROLL_URL: 'nonsense' })).toContain(
+      'TAK_ENROLL_URL is not a TAK enrollment link (expected ...?host=...&username=...&token=...)',
+    );
+  });
+
+  it('lets TAK_ENROLL_HOST differ from TAK_HOST', () => {
+    const config = loadConfig({ ...firebaseEnv, TAK_USERNAME: 'u', TAK_PASSWORD: 'p', TAK_ENROLL_HOST: 'enroll.example.org' });
+    expect(config.tak.enroll?.host).toBe('enroll.example.org');
+    expect(config.tak.clientP12Path).toBe('/certs/client.p12'); // kept as a fallback
+  });
+
+  it('needs both TAK_USERNAME and TAK_PASSWORD', () => {
+    expect(problemsOf({ ...firebaseEnv, TAK_USERNAME: 'u' })).toContain('TAK_USERNAME and TAK_PASSWORD must both be set to enroll');
   });
 
   it('rejects bad ports, backends and log levels', () => {
@@ -92,7 +129,7 @@ describe('loadConfig', () => {
   it('never puts secret values in errors or in the loggable summary', () => {
     const err = (() => {
       try {
-        loadConfig({ ...firebaseEnv, TAK_STREAM_PORT: 'p12-secret' });
+        loadConfig({ ...firebaseEnv, TAK_STREAM_PORT: 'p12-secret', TAK_USERNAME: 'u' });
       } catch (e) {
         return e as Error;
       }
@@ -100,8 +137,8 @@ describe('loadConfig', () => {
     })();
     expect(err.message).not.toContain('p12-secret');
 
-    const summary = JSON.stringify(describeConfig(loadConfig(firebaseEnv)));
-    for (const secret of ['p12-secret', 'api-key-secret', 'bridge-secret']) {
+    const summary = JSON.stringify(describeConfig(loadConfig({ ...firebaseEnv, TAK_USERNAME: 'u', TAK_PASSWORD: 'tak-secret' })));
+    for (const secret of ['p12-secret', 'api-key-secret', 'bridge-secret', 'tak-secret']) {
       expect(summary).not.toContain(secret);
     }
   });

@@ -8,6 +8,8 @@
  * never include their values, since several of them are secrets.
  */
 
+import { parseEnrollLink } from './tls/enroll.js';
+
 export type BackendKind = 'firebase' | 'pocketbase' | 'none';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -17,9 +19,14 @@ export interface TakConfig {
   streamPort: number;
   /** TAK Server API port. Reserved for the TAK-CAD poller; unused in v1. */
   apiPort: number;
-  /** Path to the bridge user's client certificate bundle (.p12). */
-  clientP12Path: string;
-  clientP12Password: string;
+  /**
+   * Certificate enrollment (preferred): the bridge requests its own client
+   * certificate from TAK Server with the TAK Portal user's credentials.
+   */
+  enroll?: { host: string; port: number; username: string; password: string };
+  /** Alternative: a client certificate bundle (.p12) made elsewhere. */
+  clientP12Path?: string;
+  clientP12Password?: string;
   /**
    * Path to the TAK Server CA as PEM. Optional: when unset, the CA certificates
    * bundled in the client .p12 are trusted.
@@ -37,6 +44,8 @@ export type BackendConfig =
 
 export interface BridgeConfig {
   tak: TakConfig;
+  /** Where the enrolled certificate is kept between runs. */
+  dataDir: string;
   backend: BackendConfig;
   bridgeEmail: string;
   bridgePassword: string;
@@ -76,15 +85,41 @@ export function loadConfig(env: Env = process.env): BridgeConfig {
     return value;
   };
 
+  // TAK Portal's "Enroll QR" link can stand in for host, username and password.
+  const enrollUrl = optional('TAK_ENROLL_URL');
+  const link = enrollUrl ? parseEnrollLink(enrollUrl) : null;
+  if (enrollUrl && !link) problems.push('TAK_ENROLL_URL is not a TAK enrollment link (expected ...?host=...&username=...&token=...)');
+
+  const host = optional('TAK_HOST') ?? link?.host;
+  if (!host) problems.push('TAK_HOST is required');
+  const username = optional('TAK_USERNAME') ?? link?.username;
+  const password = optional('TAK_PASSWORD') ?? link?.password;
+  const p12Password = optional('TAK_CLIENT_P12_PASSWORD');
+  const p12Path = optional('TAK_CLIENT_P12') ?? (p12Password ? '/certs/client.p12' : undefined);
+
   const tak: TakConfig = {
-    host: str('TAK_HOST'),
+    host: host ?? '',
     streamPort: port('TAK_STREAM_PORT', 8089),
     apiPort: port('TAK_API_PORT', 8443),
-    clientP12Path: str('TAK_CLIENT_P12', '/certs/client.p12'),
-    clientP12Password: str('TAK_CLIENT_P12_PASSWORD'),
     caPath: optional('TAK_CA'),
     serverName: optional('TAK_SERVER_NAME'),
   };
+  if (username && password) {
+    tak.enroll = { host: optional('TAK_ENROLL_HOST') ?? host ?? '', port: port('TAK_ENROLL_PORT', 8446), username, password };
+  } else if (username || password) {
+    problems.push('TAK_USERNAME and TAK_PASSWORD must both be set to enroll');
+  }
+  if (p12Path) {
+    tak.clientP12Path = p12Path;
+    tak.clientP12Password = p12Password ?? '';
+    if (!p12Password && !tak.enroll) problems.push('TAK_CLIENT_P12_PASSWORD is required with TAK_CLIENT_P12');
+  }
+  if (!tak.enroll && !tak.clientP12Path) {
+    problems.push(
+      "Set TAK_USERNAME and TAK_PASSWORD (or TAK_ENROLL_URL, from TAK Portal's Enroll QR) so the bridge can enroll, " +
+        'or TAK_CLIENT_P12 and TAK_CLIENT_P12_PASSWORD',
+    );
+  }
 
   const backendName = (env.CROWDCAD_BACKEND?.trim() || 'firebase').toLowerCase();
   let backend: BackendConfig;
@@ -111,6 +146,7 @@ export function loadConfig(env: Env = process.env): BridgeConfig {
   const needsAccount = backend.kind !== 'none';
   const config: BridgeConfig = {
     tak,
+    dataDir: optional('BRIDGE_DATA_DIR') ?? './data',
     backend,
     bridgeEmail: needsAccount ? str('BRIDGE_EMAIL') : (optional('BRIDGE_EMAIL') ?? ''),
     bridgePassword: needsAccount ? str('BRIDGE_PASSWORD') : (optional('BRIDGE_PASSWORD') ?? ''),
@@ -126,8 +162,12 @@ export function describeConfig(config: BridgeConfig): Record<string, unknown> {
   return {
     takHost: config.tak.host,
     takStreamPort: config.tak.streamPort,
-    takClientP12: config.tak.clientP12Path,
-    takCa: config.tak.caPath ?? '(from client .p12)',
+    takIdentity: config.tak.enroll
+      ? `enroll as ${config.tak.enroll.username} via ${config.tak.enroll.host}:${config.tak.enroll.port}`
+      : `.p12 at ${config.tak.clientP12Path}`,
+    takCa: config.tak.caPath ?? '(from enrollment or the .p12)',
+    takServerName: config.tak.serverName ?? '(chain check against the TAK CA)',
+    dataDir: config.dataDir,
     backend: config.backend.kind,
     backendTarget:
       config.backend.kind === 'firebase'

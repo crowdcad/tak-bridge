@@ -20,5 +20,8 @@ ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json LICENSE ./
+# The enrolled TAK certificate is kept here (a named volume in docker-compose.yml).
+RUN mkdir -p /data && chown node:node /data
+ENV BRIDGE_DATA_DIR=/data
 USER node
 CMD ["node", "dist/index.js"]

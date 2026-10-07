@@ -12,6 +12,7 @@ import path from 'node:path';
 export interface DevCerts {
   dir: string;
   caPem: string;
+  caKey: string;
   serverKey: string;
   serverCert: string;
   /** Client .p12 that also bundles the CA certificate. */
@@ -61,6 +62,7 @@ export function generateDevCerts(dir: string, password = 'atakatak'): DevCerts {
   return {
     dir,
     caPem: f('ca.pem'),
+    caKey: f('ca.key'),
     serverKey: f('server.key'),
     serverCert: f('server.pem'),
     clientP12: f('client.p12'),

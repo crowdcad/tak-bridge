@@ -152,6 +152,33 @@ describe('Bridge', () => {
     await bridge.stop();
   });
 
+  it('reports devices seen, the last position time, and TAK errors', async () => {
+    const { adapter, bridge, setClock } = setup([cfg('E1')]);
+    await bridge.start('e', 'p');
+    expect(adapter.bridgeStatus.at(-1)).toMatchObject({ devicesSeen: 0, lastPositionAt: 0, takError: '' });
+    setClock(T0 + 5_000);
+    bridge.handlePosition(pos('D1', center.lat, center.lon, T0));
+    bridge.handlePosition(pos('D2', center.lat, center.lon, T0));
+    bridge.handlePosition(pos('D1', center.lat, center.lon, T0));
+    await bridge.flush();
+    await (bridge as unknown as { writeStatus(): Promise<void> }).writeStatus();
+    expect(adapter.bridgeStatus.at(-1)).toMatchObject({ devicesSeen: 2, lastPositionAt: T0 + 5_000 });
+    await bridge.stop();
+
+    const down = new MemoryAdapter();
+    const offline = new Bridge({
+      adapter: down,
+      log,
+      version: 'test',
+      takConnected: () => false,
+      takError: () => 'Connection refused: check TAK_HOST',
+      statusIntervalMs: 3_600_000,
+    });
+    await offline.start('e', 'p');
+    expect(down.bridgeStatus.at(-1)).toMatchObject({ takConnected: false, takError: 'Connection refused: check TAK_HOST' });
+    await offline.stop();
+  });
+
   it('keeps live writes for an 8-hour, 20-device event within budget', async () => {
     const { adapter, bridge, setClock } = setup([cfg('E1')]);
     await bridge.start('e', 'p');

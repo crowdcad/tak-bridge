@@ -12,6 +12,8 @@ export interface BridgeOptions {
   version: string;
   /** Whether the TAK side is connected, for status. */
   takConnected: () => boolean;
+  /** The last TAK connection problem in plain words, for status. */
+  takError?: () => string;
   now?: () => number;
   /** Write a live doc when a device has moved more than this many meters... */
   moveThresholdM?: number;
@@ -59,13 +61,15 @@ export class Bridge {
   private unsubscribe: Unsubscribe | null = null;
   private statusTimer: NodeJS.Timeout | null = null;
   private historyTimer: NodeJS.Timeout | null = null;
-  private readonly opts: Required<Omit<BridgeOptions, 'adapter' | 'log' | 'takConnected'>> &
-    Pick<BridgeOptions, 'adapter' | 'log' | 'takConnected'>;
+  private readonly opts: Required<Omit<BridgeOptions, 'adapter' | 'log' | 'takConnected' | 'takError'>> &
+    Pick<BridgeOptions, 'adapter' | 'log' | 'takConnected' | 'takError'>;
   /** In-flight live writes, and other in-flight work (sweeps, closes). Kept apart so a close can wait for writes without waiting for itself. */
   private readonly writes = new Set<Promise<unknown>>();
   private readonly ops = new Set<Promise<unknown>>();
 
   readonly stats = { liveWrites: 0, skipped: 0, writeErrors: 0, historyWrites: 0 };
+  private readonly devicesSeen = new Set<string>();
+  private lastPositionAt = 0;
 
   constructor(options: BridgeOptions) {
     this.opts = {
@@ -198,6 +202,8 @@ export class Bridge {
 
   handlePosition(position: DevicePosition): void {
     const now = this.opts.now();
+    this.devicesSeen.add(position.deviceUid);
+    this.lastPositionAt = now;
     for (const [eventId, state] of this.events) {
       const { config } = state;
       if (!config.enabled || config.closed || state.closing) continue;
@@ -316,6 +322,9 @@ export class Bridge {
         takConnected,
         version: this.opts.version,
         linkedEventCount: this.events.size,
+        devicesSeen: this.devicesSeen.size,
+        lastPositionAt: this.lastPositionAt,
+        takError: takConnected ? '' : (this.opts.takError?.() ?? ''),
       }),
       ...active.map(([eventId, s]) =>
         this.opts.adapter.writeEventStatus(eventId, { lastSeenAt: now, takConnected, liveDeviceCount: s.lastWrite.size }),

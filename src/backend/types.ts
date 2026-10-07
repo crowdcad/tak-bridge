@@ -36,6 +36,12 @@ export interface BridgeStatus {
   takConnected: boolean;
   version: string;
   linkedEventCount: number;
+  /** Distinct TAK devices seen since the bridge started. */
+  devicesSeen: number;
+  /** When the last position arrived from TAK, or 0. */
+  lastPositionAt: number;
+  /** The last TAK connection problem, in plain words, or empty when connected. Never contains secrets. */
+  takError: string;
 }
 
 export interface EventStatus {

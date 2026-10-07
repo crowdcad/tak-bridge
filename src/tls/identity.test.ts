@@ -40,10 +40,12 @@ withOpenssl('loadTlsIdentity', () => {
   };
 
   it('loads a .p12 and an optional PEM CA', () => {
-    expect(loadTlsIdentity(tak({})).ca).toEqual([]);
+    // CA certificates bundled in the .p12 are extracted and pinned.
+    expect(loadTlsIdentity(tak({})).ca).toHaveLength(1);
+    expect(loadTlsIdentity(tak({ clientP12Path: certs.clientP12NoCa })).ca).toEqual([]);
     const withCa = loadTlsIdentity(tak({ caPath: certs.caPem }));
     expect(withCa.ca).toHaveLength(1);
-    expect(withCa.pfx.length).toBeGreaterThan(0);
+    expect(withCa.kind === 'pfx' && withCa.pfx.length).toBeGreaterThan(0);
   });
 
   it('explains a wrong password without revealing it', () => {

@@ -8,7 +8,9 @@ import { Bridge } from './bridge.js';
 import { ConfigError, describeConfig, loadConfig, type BridgeConfig } from './config.js';
 import { createLogger, type Logger } from './log.js';
 import { CotStreamSource } from './sources/cot-stream.js';
-import { TlsIdentityError, loadTlsIdentity } from './tls/identity.js';
+import { EnrollmentError } from './tls/enroll.js';
+import { TlsIdentityError } from './tls/identity.js';
+import { provisionIdentity, scheduleRenewal } from './tls/provision.js';
 
 function readVersion(): string {
   try {
@@ -42,23 +44,37 @@ async function main(): Promise<number> {
   const version = readVersion();
   log.info('tak-bridge starting', { version, ...describeConfig(config) });
 
-  let identity;
+  let provisioned;
   try {
-    identity = loadTlsIdentity(config.tak);
+    provisioned = await provisionIdentity(config.tak, config.dataDir, log);
   } catch (err) {
-    if (err instanceof TlsIdentityError) {
+    if (err instanceof TlsIdentityError || err instanceof EnrollmentError) {
       log.error(err.message);
       return 1;
     }
     throw err;
   }
 
-  const source = new CotStreamSource({ host: config.tak.host, port: config.tak.streamPort, identity, log });
+  const source = new CotStreamSource({
+    host: config.tak.host,
+    port: config.tak.streamPort,
+    identity: provisioned.identity,
+    log,
+  });
+  const stopRenewal = provisioned.enrolled
+    ? scheduleRenewal(config.tak, config.dataDir, log, provisioned.enrolled, (identity) => source.updateIdentity(identity))
+    : () => {};
   const adapter = createAdapter(config);
   let bridge: Bridge | null = null;
 
   if (adapter) {
-    bridge = new Bridge({ adapter, log, version, takConnected: () => source.isConnected() });
+    bridge = new Bridge({
+      adapter,
+      log,
+      version,
+      takConnected: () => source.isConnected(),
+      takError: () => source.lastError,
+    });
     try {
       await bridge.start(config.bridgeEmail, config.bridgePassword);
     } catch (err) {
@@ -94,6 +110,7 @@ async function main(): Promise<number> {
     const shutdown = (signal: string) => {
       log.info('shutting down', { signal });
       void (async () => {
+        stopRenewal();
         await source.stop();
         await bridge?.stop();
         await adapter?.close();
