@@ -1,6 +1,6 @@
 # CrowdCAD TAK bridge
 
-**In development. Not ready for use.** This build connects to a TAK Server and logs device positions. It does not write to CrowdCAD yet.
+**In development. Not ready for production use.** Full setup guide: [docs/setup-infra-tak.md](docs/setup-infra-tak.md).
 
 The bridge runs next to a TAK Server and puts the positions of TAK devices (ATAK, iTAK, WinTAK) on the [CrowdCAD](https://github.com/crowdcad/crowdcad) dispatch map.
 
@@ -15,7 +15,7 @@ Design and data model, in the CrowdCAD repository:
 
 ## Setup on an infra-TAK host
 
-This is the target setup. Steps 2 and 4 depend on CrowdCAD features that are still being built.
+The short version is below. See [docs/setup-infra-tak.md](docs/setup-infra-tak.md) for the full guide, operations and troubleshooting.
 
 1. **Create a TAK user for the bridge.** In TAK Portal:
    1. Create a user named `crowdcad-bridge`.
@@ -39,7 +39,7 @@ This is the target setup. Steps 2 and 4 depend on CrowdCAD features that are sti
 5. **Optional: check the TAK side first.** Set `CROWDCAD_BACKEND=none`. The bridge then connects to TAK and logs each position it receives (`"msg":"position"`), but writes nothing. Switch it back once positions appear.
 6. **Start it:**
    ```bash
-   docker compose up -d
+   docker compose up -d            # published image; add --build to build from source
    docker compose logs -f
    ```
 7. **Check the status.** CrowdCAD shows the bridge's status in the event's TAK panel.
