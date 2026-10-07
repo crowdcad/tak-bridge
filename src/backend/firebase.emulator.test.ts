@@ -7,6 +7,7 @@ import { Bridge } from '../bridge.js';
 import { createLogger } from '../log.js';
 import { Simulation } from '../sim/model.js';
 import { coreFile } from '../testing/core.js';
+import { EXPECTED_PARITY, runParityScenario } from '../testing/parity.js';
 import { FirebaseAdapter } from './firebase.js';
 
 /**
@@ -165,5 +166,35 @@ describe('FirebaseAdapter + Bridge against the emulator', () => {
     await b.flush();
     expect(b.stats.writeErrors).toBeGreaterThan(0);
     expect((await admin((db) => getDocs(collection(db, 'events/E1/takLive')))).size).toBe(0);
+  });
+});
+
+describe('parity scenario (Firebase)', () => {
+  it('matches the expected cross-backend result', async () => {
+    const result = await runParityScenario({
+      adapter: new FirebaseAdapter({ apiKey: 'fake-api-key', projectId: PROJECT, authDomain: 'localhost' }),
+      email,
+      password,
+      eventId: 'E1',
+      linkDevice: (eventId, deviceUid, teamId) =>
+        admin((db) =>
+          setDoc(doc(db, `events/${eventId}/takDeviceLinks/${encodeURIComponent(deviceUid)}`), {
+            teamId,
+            linkedAt: Date.now(),
+            method: 'manual',
+            linkedBy: 'OWN',
+          }),
+        ),
+      closeEvent: (eventId) => admin((db) => updateDoc(doc(db, `events/${eventId}/takConfig/current`), { closed: true })),
+      liveDeviceUids: async (eventId) =>
+        (await admin((db) => getDocs(collection(db, `events/${eventId}/takLive`)))).docs.map((d) => decodeURIComponent(d.id)),
+      historySegments: async (eventId) =>
+        (await admin((db) => getDocs(collection(db, `events/${eventId}/takHistory`)))).docs.map((d) => {
+          const x = d.data();
+          return { deviceUid: x.deviceUid, teamId: x.teamId, endedAt: x.endedAt ?? null };
+        }),
+    });
+    adapter = null; // closed by the scenario
+    expect(result).toEqual(EXPECTED_PARITY);
   });
 });

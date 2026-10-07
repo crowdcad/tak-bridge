@@ -6,6 +6,7 @@ import { Bridge } from '../bridge.js';
 import { createLogger } from '../log.js';
 import { Simulation } from '../sim/model.js';
 import { clientFor, pocketbaseAvailable, startPocketBase, type LocalPocketBase } from '../testing/pocketbase.js';
+import { EXPECTED_PARITY, runParityScenario } from '../testing/parity.js';
 import { PocketBaseAdapter } from './pocketbase.js';
 
 /**
@@ -161,6 +162,38 @@ withPocketBase('PocketBase TAK rules and adapter', () => {
       await as.SH!.collection('events').update(eventIds.STD!, { calls: [] });
       await rejects(as.SH!.collection('events').update(eventIds.STD!, { mapMode: 'tak' }));
       await as.OWN!.collection('events').update(eventIds.STD!, { mapMode: 'tak' });
+    });
+  });
+
+  describe('parity scenario (PocketBase)', () => {
+    it('matches the expected cross-backend result', async () => {
+      const ev = await pb.admin.collection('events').create({ name: 'P1', userId: ids.OWN, mapMode: 'tak' });
+      await pb.admin.collection('tak_event_config').create({ event: ev.id, bridge: ids.BR, enabled: true, closed: false, historyMode: 'summary' });
+      const result = await runParityScenario({
+        adapter: new PocketBaseAdapter({ url: pb.url, pollMs: 200 }),
+        email: 'br@tests.local',
+        password: PW,
+        eventId: ev.id,
+        linkDevice: async (eventId, deviceUid, teamId) => {
+          await pb.admin.collection('tak_device_links').create({ event: eventId, deviceUid, teamId, linkedAt: Date.now(), method: 'manual', linkedBy: ids.OWN });
+        },
+        closeEvent: async (eventId) => {
+          const cfg = await pb.admin.collection('tak_event_config').getFirstListItem(`event = "${eventId}"`);
+          await pb.admin.collection('tak_event_config').update(cfg.id, { closed: true });
+        },
+        liveDeviceUids: async (eventId) =>
+          (await pb.admin.collection('tak_live').getFullList({ filter: `event = "${eventId}"` })).map((r) => r.deviceUid as string),
+        historySegments: async (eventId) =>
+          (await pb.admin.collection('tak_history').getFullList({ filter: `event = "${eventId}"` })).map((r) => ({
+            deviceUid: r.deviceUid as string,
+            teamId: r.teamId as string,
+            endedAt: (r.endedAt as number) > 0 ? (r.endedAt as number) : null,
+          })),
+      });
+      expect(result).toEqual(EXPECTED_PARITY);
+      // Leave the shared fixtures as they were for the tests below.
+      const cfg = await pb.admin.collection('tak_event_config').getFirstListItem(`event = "${ev.id}"`);
+      await pb.admin.collection('tak_event_config').delete(cfg.id);
     });
   });
 
