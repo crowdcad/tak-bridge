@@ -58,6 +58,8 @@ export interface RecorderOptions {
   maxCells?: number;
   pointIntervalMs?: number;
   pointsPerChunk?: number;
+  /** Clock for closing a segment without an explicit end time (the bridge's time, epoch ms). */
+  now?: () => number;
 }
 
 interface WindowAcc {
@@ -111,6 +113,7 @@ export class HistoryRecorder {
       maxCells: 5_000,
       pointIntervalMs: 15_000,
       pointsPerChunk: 500,
+      now: Date.now,
       ...options,
     };
   }
@@ -183,7 +186,10 @@ export class HistoryRecorder {
     }
   }
 
-  /** Closes every open segment, e.g. at event close. endedAt defaults to each segment's last fix. */
+  /**
+   * Closes every open segment, e.g. at event close. Without `at`, each segment
+   * ends at its last fix plus the time credited to it (see close).
+   */
   closeAll(at: number | null): void {
     for (const deviceUid of [...this.open.keys()]) this.close(deviceUid, at);
   }
@@ -209,10 +215,22 @@ export class HistoryRecorder {
     return this.open.size;
   }
 
+  /**
+   * Ends a segment. Its last fix has no next fix to measure against, so it is
+   * credited the time until the end (`at`, or now), capped like any other
+   * gap. Without this, a segment's final position, and a segment with a
+   * single position, would count for nothing.
+   */
   private close(deviceUid: string, at: number | null): void {
     const seg = this.open.get(deviceUid);
     if (!seg) return;
-    seg.endedAt = at ?? seg.last?.t ?? seg.startedAt;
+    let end = at ?? seg.startedAt;
+    if (seg.last) {
+      const dt = Math.min(Math.max(0, (at ?? this.o.now()) - seg.last.t), this.o.maxGapMs);
+      this.credit(seg, seg.last, dt);
+      end = at ?? seg.last.t + dt;
+    }
+    seg.endedAt = end;
     seg.dirty = true;
     this.open.delete(deviceUid);
     this.closed.push(seg);

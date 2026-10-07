@@ -158,7 +158,7 @@ export class Bridge {
       }
       return;
     }
-    if (!state.recorder) state.recorder = new HistoryRecorder(historyMode);
+    if (!state.recorder) state.recorder = new HistoryRecorder(historyMode, { now: this.opts.now });
     else state.recorder.setMode(historyMode);
     const recorder = state.recorder;
     if (!state.unwatchLinks) {

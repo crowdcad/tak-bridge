@@ -181,7 +181,7 @@ TTL deletes run on Firestore's own schedule, typically within a day. Correctness
 ## What is stored
 
 - **Live positions.** One record per device per event, overwritten as the device reports, and removed when the event ends.
-- **Location history** (Summary or Detailed only). Per device and team: 5-minute summaries and a heat-map grid. Detailed adds points while the team is on a call. Only the event's owner can view history.
+- **Location history** (Summary or Detailed only). Per device and team: 5-minute summaries and a heat-map grid. Detailed adds points while the team is on a call. Only the event's owner can view history, on the event summary page after the event ends.
 - **Status.** The bridge's heartbeat (last seen, connected to TAK, devices seen, last position time, last TAK problem), shown to admins and allowed users.
 
 The bridge's `.env`, its private key and certificate (in the `tak-bridge-data` volume or `data/` folder) stay on the machine it runs on. Keep them readable only by the account that runs the bridge.

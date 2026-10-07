@@ -61,18 +61,49 @@ describe('HistoryRecorder', () => {
   });
 
   it('starts a new segment when a device is reassigned, crediting history by time', () => {
-    const r = new HistoryRecorder('summary');
+    let now = T0;
+    const r = new HistoryRecorder('summary', { now: () => now });
     r.setLinks(new Map([['D1', 'teamA']]));
     r.add(fix('D1', T0));
     r.add(fix('D1', T0 + MIN));
+    now = T0 + MIN + 20_000;
     r.setLinks(new Map([['D1', 'teamB']]));
     r.add(fix('D1', T0 + 2 * MIN));
     const { segments } = r.flush();
+    // teamA's last fix is credited the 20 s until the reassignment.
     expect(segments.map((s) => [s.teamId, s.endedAt])).toEqual([
       ['teamB', null],
-      ['teamA', T0 + MIN],
+      ['teamA', T0 + MIN + 20_000],
     ]);
+    expect(segments[1]!.windows[0]!.secs).toBe(80);
     expect(segments[0]!.segmentId).toBe(`D1~teamB~${T0 + 2 * MIN}`);
+  });
+
+  it('credits the last fix at close, so a short segment still has a heat map', () => {
+    let now = T0;
+    const r = new HistoryRecorder('summary', { now: () => now });
+    r.setLinks(new Map([['D1', 't1'], ['D2', 't2']]));
+    r.add(fix('D1', T0));
+    r.add(fix('D2', T0, north(50)));
+    now = T0 + 25_000;
+    r.closeAll(null);
+    const segs = r.flush(true).segments;
+    const d1 = segs.find((s) => s.deviceUid === 'D1')!;
+    expect(d1.endedAt).toBe(T0 + 25_000);
+    expect(d1.windows[0]!.secs).toBe(25);
+    expect(Object.values(d1.grid.cells)).toEqual([25]);
+    // Capped like any other gap, and an explicit end time wins.
+    const late = new HistoryRecorder('summary', { now: () => T0 + 10 * MIN });
+    late.setLinks(new Map([['D1', 't1']]));
+    late.add(fix('D1', T0));
+    late.closeAll(null);
+    expect(late.flush(true).segments[0]!.windows[0]!.secs).toBe(60);
+    const at = new HistoryRecorder('summary', { now: () => T0 + 10 * MIN });
+    at.setLinks(new Map([['D1', 't1']]));
+    at.add(fix('D1', T0));
+    at.closeAll(T0 + 5_000);
+    const [seg] = at.flush(true).segments;
+    expect([seg!.endedAt, seg!.windows[0]!.secs]).toEqual([T0 + 5_000, 5]);
   });
 
   it('only writes segments that changed since the last flush', () => {
