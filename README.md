@@ -4,7 +4,7 @@
 
 The bridge runs next to a TAK Server and puts the positions of TAK devices (ATAK, iTAK, WinTAK) on the [CrowdCAD](https://github.com/crowdcad/crowdcad) dispatch map.
 
-- **Connections.** It connects to the TAK Server over TLS CoT streaming (port 8089) with its own client certificate. It writes to CrowdCAD (Firebase or PocketBase) as a dedicated bridge account, so CrowdCAD's security rules apply to it.
+- **Connections.** It enrolls with the TAK Server for its own client certificate (port 8446, like a phone scanning an Enroll QR) and receives positions over TLS CoT streaming (port 8089). It writes to CrowdCAD (Firebase or PocketBase) as a dedicated bridge account, so CrowdCAD's security rules apply to it.
 - **What it reads.** Positions only. The bridge never reads CrowdCAD event data, calls or patient information.
 - **Where it writes.** Only to events whose owner linked this bridge.
 
@@ -13,38 +13,20 @@ Design and data model, in the CrowdCAD repository:
 - [Data contract](https://github.com/crowdcad/crowdcad/blob/integration/tak/docs/tak-integration/data-contract.md)
 - [Decision log](https://github.com/crowdcad/crowdcad/blob/integration/tak/docs/tak-integration/decisions.md)
 
-## Setup on an infra-TAK host
+## Setup
 
-The short version is below. See [docs/setup-infra-tak.md](docs/setup-infra-tak.md) for the full guide, operations and troubleshooting.
+The short version is below. See [docs/setup-infra-tak.md](docs/setup-infra-tak.md) for the full guide, running a local test, operations and troubleshooting.
 
-1. **Create a TAK user for the bridge.** In TAK Portal:
-   1. Create a user named `crowdcad-bridge`.
-   2. Add it to the TAK groups your responders use. The bridge only receives positions from groups it belongs to.
-   3. Download its certificate bundle (`.p12`) and note its password.
-   4. The `.p12` normally includes the TAK Server CA. If it does not, also get the CA as a PEM file (convert a truststore `.p12` with `openssl pkcs12 -in truststore.p12 -nokeys -out ca.pem`).
-2. **Create a bridge connection in CrowdCAD.** It shows a one-time block of settings (backend and bridge account). Copy it now; the password is not shown again.
-3. **On the TAK host,** clone this repository:
-   ```bash
-   git clone https://github.com/crowdcad/tak-bridge.git
-   cd tak-bridge
-   ```
-4. **Configure it:**
-   ```bash
-   cp .env.example .env
-   mkdir certs
-   # copy the bridge's .p12 to certs/client.p12; if the .p12 lacks the CA, also add certs/ca.pem and set TAK_CA=/certs/ca.pem
-   ```
-   Fill in `.env`: the TAK section yourself, and the CrowdCAD and bridge sections from step 2.
-   The container runs as an unprivileged user, so make the certificate files readable: `chmod 644 certs/*`.
-5. **Optional: check the TAK side first.** Set `CROWDCAD_BACKEND=none`. The bridge then connects to TAK and logs each position it receives (`"msg":"position"`), but writes nothing. Switch it back once positions appear.
-6. **Start it:**
-   ```bash
-   docker compose up -d            # published image; add --build to build from source
-   docker compose logs -f
-   ```
-7. **Check the status.** CrowdCAD shows the bridge's status in the event's TAK panel.
+1. **Create a TAK user for the bridge in TAK Portal,** for example `crowdcad-bridge`, with a password. Add it to the TAK groups your responders use: the bridge only receives positions from groups it belongs to. No certificate download is needed.
+2. **In CrowdCAD, go to Profile > Admin > TAK > Add TAK server.** Choose where the bridge runs (the TAK Server machine with Docker, or this computer for a test) and enter the TAK Server address, username and password, or paste the user's Enroll QR link. CrowdCAD then shows the exact commands to paste. They download the bridge, write its complete `.env`, and start it. Copy them right away: they're shown only once.
+3. **Run the commands.** On first start the bridge enrolls with TAK Server (port 8446) for its own client certificate, saves it, and renews it before it expires. Then it streams positions over TLS (port 8089).
+4. **Watch the checklist in CrowdCAD.** It shows whether the bridge signed in, connected to TAK, and is receiving positions, and explains any problem.
 
-`.env` and `certs/` contain secrets. Both are excluded from git and from the Docker build context. Keep them readable only by the user that runs Docker.
+To check the TAK side alone, set `CROWDCAD_BACKEND=none`. The bridge then logs each position it receives (`"msg":"position"`) and writes nothing.
+
+To set the bridge up by hand, copy `.env.example` to `.env` (every setting is described there), then run `docker compose up -d --build`. A client certificate bundle (`TAK_CLIENT_P12`) still works instead of enrollment.
+
+`.env` and the bridge's data (the `tak-bridge-data` volume, or `data/` when run with Node) contain secrets. Both are excluded from git and from the Docker build context. Keep them readable only by the user that runs the bridge.
 
 ## Development
 
