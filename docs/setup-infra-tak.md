@@ -30,9 +30,30 @@ You need:
 - **A CrowdCAD admin account** (Profile shows an **Admin** area).
 - **A CrowdCAD build with TAK enabled** (`NEXT_PUBLIC_TAK=on`). Without it, CrowdCAD shows no TAK options.
 - **Firebase deployments only:** email/password sign-up must be enabled in Firebase Authentication, because CrowdCAD creates the bridge's account from the browser.
+- **Firebase deployments only:** the `takConfig` index, created once per Firebase project. See [Firebase: create the index](#firebase-create-the-index-once-per-project) below.
 - **Where the bridge will run:**
   - **On the TAK Server machine (real use):** Docker with Docker Compose, git, and outbound HTTPS to your CrowdCAD backend.
   - **On your computer (test):** Node.js 22 or newer and git. Your computer must be able to reach the TAK Server on ports 8446 and 8089.
+
+### Firebase: create the index (once per project)
+
+The bridge finds the events linked to it with one Firestore query across every event's `takConfig`. Real Firestore needs an index for that query (the emulators don't). Without it the bridge connects to TAK and CrowdCAD but never sees an event. Its log shows:
+
+```
+"msg":"watching linked events failed","message":"The query requires a COLLECTION_GROUP_ASC index for collection takConfig and field bridgeUid. ..."
+```
+
+Create it once per Firebase project, before or after starting the bridge, in either of these ways:
+
+- **From a CrowdCAD checkout** (its `firestore.indexes.json` defines it):
+
+  ```bash
+  firebase deploy --only firestore:indexes --project YOUR_PROJECT_ID
+  ```
+
+- **In the Firebase console:** open the link in the bridge's log message, or go to **Firestore Database > Indexes > Single field > Add exemption** and enter collection ID `takConfig`, field path `bridgeUid`, with **Collection group** scope **Ascending** enabled. Keep the collection-scope indexes as they are.
+
+The index takes a few minutes to build; the console shows its status. Then restart the bridge (`docker compose restart`, or stop and start it with Node). The log should show `linked events` with no error before it.
 
 ## 1. Create the bridge's TAK user
 
@@ -43,11 +64,11 @@ In TAK Portal:
    - if TAK Portal shows the link next to the code, copy it;
    - otherwise scan the code with a phone camera and copy the text it shows. It looks like `tak://com.atakmap.app/enroll?host=…&username=…&token=…`.
 
-   The link is optional; you can also type the TAK Server address, username and password into CrowdCAD yourself.
+   The link is optional. In CrowdCAD it fills in only the TAK Server address and username; you always type the password.
 
 You do not need to download a certificate (`.p12`). The bridge creates its own private key, which never leaves the machine it runs on, and asks TAK Server to sign it (enrollment, port 8446). It saves the certificate and renews it before it expires.
 
-**Password or token?** Prefer the user's real password. A token from the Enroll QR may work only once, and the bridge signs in again each time it renews its certificate. If you use a token, the first start works, but you'll need to update `TAK_PASSWORD` before the certificate expires (the bridge logs a warning when renewal fails).
+**Password, not token.** Use the user's real password. A token from the Enroll QR may work only once, and the bridge signs in again each time it renews its certificate. That's why CrowdCAD doesn't take the password from the link. If you do put a token in `TAK_PASSWORD` by hand, the first start works, but you'll need to update it before the certificate expires (the bridge logs a warning when renewal fails).
 
 ## 2. Add the TAK server in CrowdCAD
 
@@ -56,7 +77,7 @@ Go to **Profile > Admin > TAK > Add TAK server**.
 1. **Name and placement.** Name the server (for example "Main TAK server") and choose where the bridge will run:
    - **On the TAK Server machine (Docker)** for real use;
    - **On this computer (test)** to try it out. CrowdCAD picks this automatically when it's running locally or on the Firebase emulators, since a bridge elsewhere couldn't reach those.
-2. **TAK sign-in.** Paste the Enroll QR link to fill in the fields, or type the **TAK Server address** (not the TAK Portal address), **username** and **password**. CrowdCAD doesn't save these; they only go into the bridge's settings.
+2. **TAK sign-in.** Paste the Enroll QR link to fill in the **TAK Server address** and **username**, or type them (the TAK Server address, not the TAK Portal address). Then type the TAK user's **password**; use the eye button to check it, since a browser can autofill a saved password into that field. CrowdCAD doesn't save these; they only go into the bridge's settings. Passwords with characters such as `$` or `#` are quoted in `.env` automatically.
 3. **Create bridge settings.** CrowdCAD creates a dedicated CrowdCAD account for the bridge and shows:
    - the commands to paste, which download the bridge, write its complete `.env`, and start it;
    - the `.env` on its own, under **Just the .env contents**.
@@ -93,7 +114,7 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-In the log, look for `enrolled with TAK Server`, then `connected to TAK Server`. Press Ctrl+C to stop watching the log; the bridge keeps running and starts again after a reboot.
+In the log, look for `enrolled with TAK Server`, `linked events` and `connected to TAK Server`. On Firebase, a `watching linked events failed` error just before `linked events` means the [index](#firebase-create-the-index-once-per-project) is missing. Press Ctrl+C to stop watching the log; the bridge keeps running and starts again after a reboot.
 
 The enrolled certificate is kept in a Docker volume (`tak-bridge-data`), so it survives restarts and upgrades. To force a new certificate, run `docker compose down -v` (this deletes the volume) and start again.
 
@@ -154,7 +175,9 @@ The checklist in CrowdCAD and the server's row in **Admin > TAK** show the bridg
 | Message or symptom | Likely cause and fix |
 |---|---|
 | Checklist stuck on **Bridge signed in to CrowdCAD** | The bridge isn't running, or can't sign in. Check its log for `could not sign in to CrowdCAD`: re-check `BRIDGE_EMAIL`, `BRIDGE_PASSWORD` and the backend settings, or Rotate. On a local test with emulators, make sure they are running. |
-| `TAK Server refused the username or password` | Wrong `TAK_USERNAME` or `TAK_PASSWORD`, or a one-time Enroll QR token that was already used. Use the user's real password, or generate a new token. |
+| `TAK Server refused the username or password` | Wrong `TAK_USERNAME` or `TAK_PASSWORD`, or a one-time Enroll QR token that was already used. Check the password with `curl -s -o /dev/null -w '%{http_code}
+' -u 'USER:PASSWORD' https://TAK_HOST:8446/Marti/api/tls/config` (200 means it's right; then check `.env`, for example with `docker compose config`). Older CrowdCAD versions could put an Enroll QR token or a browser-autofilled password in `TAK_PASSWORD`; set the user's real password by hand. |
+| `watching linked events failed ... requires a COLLECTION_GROUP_ASC index` (Firebase) | The `takConfig` index is missing. [Create it](#firebase-create-the-index-once-per-project), wait for it to build, and restart the bridge. Until then the bridge sees no events. |
 | `Cannot reach TAK Server enrollment at …:8446` | `TAK_HOST` is the TAK Portal address instead of the TAK Server address, or port 8446 is blocked from where the bridge runs. |
 | `…set TAK_CA to the TAK Server CA` (enrollment) | Port 8446 uses TAK Server's own CA rather than a public certificate. Export the CA as PEM (for example `openssl pkcs12 -in truststore.p12 -nokeys -out ca.pem`), put it next to `.env`, and set `TAK_CA`. In Docker, mount it into the container (for example in `certs/`, as `/certs/ca.pem`). |
 | `Connection refused: check TAK_HOST and TAK_STREAM_PORT` | Nothing listening on 8089 at that address, or a firewall. |

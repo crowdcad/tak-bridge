@@ -18,9 +18,10 @@ Design and data model, in the CrowdCAD repository:
 The short version is below. See [docs/setup-infra-tak.md](docs/setup-infra-tak.md) for the full guide, running a local test, operations and troubleshooting.
 
 1. **Create a TAK user for the bridge in TAK Portal,** for example `crowdcad-bridge`, with a password. Add it to the TAK groups your responders use: the bridge only receives positions from groups it belongs to. No certificate download is needed.
-2. **In CrowdCAD, go to Profile > Admin > TAK > Add TAK server.** Choose where the bridge runs (the TAK Server machine with Docker, or this computer for a test) and enter the TAK Server address, username and password, or paste the user's Enroll QR link. CrowdCAD then shows the exact commands to paste. They download the bridge, write its complete `.env`, and start it. Copy them right away: they're shown only once.
-3. **Run the commands.** On first start the bridge enrolls with TAK Server (port 8446) for its own client certificate, saves it, and renews it before it expires. Then it streams positions over TLS (port 8089).
-4. **Watch the checklist in CrowdCAD.** It shows whether the bridge signed in, connected to TAK, and is receiving positions, and explains any problem.
+2. **On Firebase, create the `takConfig` index once per project:** `firebase deploy --only firestore:indexes --project YOUR_PROJECT_ID` from a CrowdCAD checkout, or in the Firebase console (see the [full guide](docs/setup-infra-tak.md#firebase-create-the-index-once-per-project)). Without it the bridge never sees an event.
+3. **In CrowdCAD, go to Profile > Admin > TAK > Add TAK server.** Choose where the bridge runs (the TAK Server machine with Docker, or this computer for a test). Enter the TAK Server address and username, or paste the user's Enroll QR link to fill them in, then type the user's password. CrowdCAD then shows the exact commands to paste. They download the bridge, write its complete `.env`, and start it. Copy them right away: they're shown only once.
+4. **Run the commands.** On first start the bridge enrolls with TAK Server (port 8446) for its own client certificate, saves it, and renews it before it expires. Then it streams positions over TLS (port 8089).
+5. **Watch the checklist in CrowdCAD.** It shows whether the bridge signed in, connected to TAK, and is receiving positions, and explains any problem.
 
 To check the TAK side alone, set `CROWDCAD_BACKEND=none`. The bridge then logs each position it receives (`"msg":"position"`) and writes nothing.
 
