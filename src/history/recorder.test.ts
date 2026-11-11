@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { Simulation } from '../sim/model.js';
 import type { DevicePosition } from '../sources/types.js';
-import { HistoryRecorder } from './recorder.js';
+import { heatLattice, HistoryRecorder } from './recorder.js';
 
 const center = { lat: 45.0012, lon: -100.0021 };
 const T0 = Date.parse('2026-10-07T08:00:00Z');
@@ -77,6 +77,38 @@ describe('HistoryRecorder', () => {
     ]);
     expect(segments[1]!.windows[0]!.secs).toBe(80);
     expect(segments[0]!.segmentId).toBe(`D1~teamB~${T0 + 2 * MIN}`);
+  });
+
+  it('snaps every segment to one event-wide heat lattice, so cells line up (contract 0.8.0)', () => {
+    let now = T0;
+    const r = new HistoryRecorder('summary', { now: () => now });
+    // Two devices whose first fixes are 2.1 m apart, standing at the same spot afterwards.
+    r.setLinks(new Map([['D1', 't1'], ['D2', 't2']]));
+    r.add(fix('D1', T0, north(0)));
+    r.add(fix('D2', T0, north(2.1)));
+    r.add(fix('D1', T0 + 10_000, north(30)));
+    r.add(fix('D2', T0 + 10_000, north(30)));
+    now = T0 + 20_000;
+    r.closeAll(null);
+    const segs = r.flush(true).segments;
+    const { latStep, lonStep } = heatLattice(5, center.lat);
+    const cellAt = (s: (typeof segs)[number], key: string) => {
+      const [ix, iy] = key.split(',').map(Number) as [number, number];
+      return `${Math.round(s.grid.originLon / lonStep) + ix},${Math.round(s.grid.originLat / latStep) + iy}`;
+    };
+    for (const s of segs) {
+      expect(s.grid.lattice).toBe(true);
+      // The origin is a lattice corner.
+      expect(s.grid.originLat / latStep).toBeCloseTo(Math.round(s.grid.originLat / latStep), 9);
+      expect(s.grid.originLon / lonStep).toBeCloseTo(Math.round(s.grid.originLon / lonStep), 9);
+    }
+    // The same spot (30 m north) is the same lattice cell in both segments.
+    const last = (s: (typeof segs)[number]) => Object.keys(s.grid.cells).map((k) => cellAt(s, k));
+    const d1 = segs.find((s) => s.deviceUid === 'D1')!;
+    const d2 = segs.find((s) => s.deviceUid === 'D2')!;
+    const spot = `${Math.floor(center.lon / lonStep)},${Math.floor(north(30) / latStep)}`;
+    expect(last(d1)).toContain(spot);
+    expect(last(d2)).toContain(spot);
   });
 
   it('credits the last fix at close, so a short segment still has a heat map', () => {
