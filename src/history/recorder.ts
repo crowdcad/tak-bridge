@@ -35,7 +35,12 @@ export interface HistorySegmentDoc {
   startedAt: number;
   endedAt: number | null;
   windows: HistoryWindow[];
-  grid: { cellM: number; originLat: number; originLon: number; cells: Record<string, number>; overflowSecs: number };
+  /**
+   * Heat-map grid. With `lattice` (contract 0.8.0) the origin is snapped to an
+   * event-wide lattice anchored at 0,0 and cells use its size (heatLattice), so
+   * every segment's cells line up on the summary heat map.
+   */
+  grid: { cellM: number; originLat: number; originLon: number; cells: Record<string, number>; overflowSecs: number; lattice: true };
 }
 
 export interface HistoryPoint {
@@ -81,6 +86,8 @@ interface Segment {
   startedAt: number;
   endedAt: number | null;
   origin: { lat: number; lon: number };
+  /** The heat lattice's cell size, and the first fix's lattice cell (the grid's origin). */
+  lattice: { latStep: number; lonStep: number; ox: number; oy: number };
   windows: Map<number, WindowAcc>;
   cells: Map<string, number>;
   overflowSecs: number;
@@ -93,6 +100,17 @@ interface Segment {
 
 const R = 6_371_008.8;
 const M_PER_DEG = (R * Math.PI) / 180;
+
+/**
+ * The event-wide heat lattice (contract 0.8.0): cells of `cellM` metres
+ * anchored at 0,0, with the longitude step taken at the whole-degree latitude
+ * nearest `lat`, so every segment of an event shares it. CrowdCAD's
+ * heatGrid() computes the same steps.
+ */
+export function heatLattice(cellM: number, lat: number): { latStep: number; lonStep: number } {
+  const latStep = cellM / M_PER_DEG;
+  return { latStep, lonStep: latStep / Math.cos((Math.round(lat) * Math.PI) / 180) };
+}
 
 export class HistoryRecorder {
   private mode: HistoryMode;
@@ -154,6 +172,10 @@ export class HistoryRecorder {
         startedAt: t,
         endedAt: null,
         origin: { lat: p.lat, lon: p.lon },
+        lattice: (() => {
+          const { latStep, lonStep } = heatLattice(this.o.cellM, p.lat);
+          return { latStep, lonStep, ox: Math.floor(p.lon / lonStep), oy: Math.floor(p.lat / latStep) };
+        })(),
         windows: new Map(),
         cells: new Map(),
         overflowSecs: 0,
@@ -255,7 +277,11 @@ export class HistoryRecorder {
     w.sumN += secs * at.n;
     w.sumR2 += secs * (at.e * at.e + at.n * at.n);
 
-    const key = `${Math.floor(at.e / this.o.cellM)},${Math.floor(at.n / this.o.cellM)}`;
+    // The fix's cell on the event-wide lattice, relative to the segment's first cell.
+    const lat = seg.origin.lat + at.n / M_PER_DEG;
+    const lon = seg.origin.lon + at.e / (M_PER_DEG * Math.cos((seg.origin.lat * Math.PI) / 180));
+    const { latStep, lonStep, ox, oy } = seg.lattice;
+    const key = `${Math.floor(lon / lonStep) - ox},${Math.floor(lat / latStep) - oy}`;
     const existing = seg.cells.get(key);
     if (existing !== undefined) seg.cells.set(key, existing + secs);
     else if (seg.cells.size < this.o.maxCells) seg.cells.set(key, secs);
@@ -287,10 +313,11 @@ export class HistoryRecorder {
       windows,
       grid: {
         cellM: this.o.cellM,
-        originLat: seg.origin.lat,
-        originLon: seg.origin.lon,
+        originLat: seg.lattice.oy * seg.lattice.latStep,
+        originLon: seg.lattice.ox * seg.lattice.lonStep,
         cells: Object.fromEntries([...seg.cells].map(([k, v]) => [k, round(v, 1)])),
         overflowSecs: round(seg.overflowSecs, 1),
+        lattice: true,
       },
     };
   }
