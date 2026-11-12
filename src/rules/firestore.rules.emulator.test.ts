@@ -407,7 +407,7 @@ describe('MCI role logins', () => {
   });
 
   it('patient details: responders, transport and incident command read them; logistics does not', async () => {
-    for (const [uid, username] of [['RA', 'resp-abcd'], ['RB', 'trans-rb'], ['RI', 'ic-ri'], ['RT', 'tri-rt']]) {
+    for (const [uid, username] of [['RA', 'resp-abcd'], ['RB', 'trans-rb'], ['RI', 'ic-ri'], ['RT', 'tri-rt']] as const) {
       await assertSucceeds(getDoc(doc(role(uid, username), 'events/M1/mci/patients')));
     }
     const logistics = role('RL', 'log-rl');
