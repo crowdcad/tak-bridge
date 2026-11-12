@@ -372,11 +372,15 @@ describe('MCI role logins', () => {
         put('events/M1', { userId: 'OWN', mapMode: 'tak', calls: [{ chiefComplaint: 'x' }] }),
         put('events/M1/roleAccounts/RA', account('RA', 'M1')),
         put('events/M1/roleAccounts/RB', account('RB', 'M1', { role: 'transport' })),
+        put('events/M1/roleAccounts/RL', account('RL', 'M1', { role: 'logistics' })),
+        put('events/M1/roleAccounts/RI', account('RI', 'M1', { role: 'incident_command' })),
+        put('events/M1/roleAccounts/RT', account('RT', 'M1', { role: 'triage' })),
         put('events/M1/roleAccounts/RD', account('RD', 'M1', { disabled: true })),
         put('roleAccountIndex/RA', { eventId: 'M1', role: 'responder' }),
         put('events/M1/mci/state', { active: true }),
         put('events/M1/mci/units', { units: [] }),
         put('events/M1/mci/map', { layers: [] }),
+        put('events/M1/mci/patients', { patients: { p1: { age: '34', complaint: 'ankle' } }, updatedAt: now }),
         put('events/M1/takConfig/current', config('M1')),
         put('events/M1/takMapAlignment/L1', { mapUrl: 'x', residualM: 2 }),
         put('events/M1/takDeviceLinks/DEV1', { teamId: 't1', linkedAt: now, method: 'auto', linkedBy: 'OWN' }),
@@ -393,13 +397,25 @@ describe('MCI role logins', () => {
 
   it("an active login reads its event's MCI documents and TAK map data", async () => {
     const db = responder();
-    for (const path of ['mci/state', 'mci/units', 'mci/map', 'takConfig/current', 'takMapAlignment/L1', 'takDeviceLinks/DEV1', 'takLive/DEV1']) {
+    for (const path of ['mci/state', 'mci/units', 'mci/map', 'mci/patients', 'takConfig/current', 'takMapAlignment/L1', 'takDeviceLinks/DEV1', 'takLive/DEV1']) {
       await assertSucceeds(getDoc(doc(db, `events/M1/${path}`)));
     }
     await assertSucceeds(getDocs(collection(db, 'events/M1/takLive')));
     await assertSucceeds(getDocs(collection(db, 'events/M1/takDeviceLinks')));
     await assertSucceeds(getDoc(doc(db, 'events/M1/roleAccounts/RA')));
     await assertSucceeds(getDoc(doc(db, 'roleAccountIndex/RA')));
+  });
+
+  it('patient details: responders, transport and incident command read them; logistics does not', async () => {
+    for (const [uid, username] of [['RA', 'resp-abcd'], ['RB', 'trans-rb'], ['RI', 'ic-ri'], ['RT', 'tri-rt']]) {
+      await assertSucceeds(getDoc(doc(role(uid, username), 'events/M1/mci/patients')));
+    }
+    const logistics = role('RL', 'log-rl');
+    await assertFails(getDoc(doc(logistics, 'events/M1/mci/patients')));
+    // Logistics still reads what its view needs.
+    for (const name of ['state', 'units', 'map']) await assertSucceeds(getDoc(doc(logistics, `events/M1/mci/${name}`)));
+    await assertSucceeds(getDoc(doc(as('owner'), 'events/M1/mci/patients')));
+    await assertFails(getDoc(doc(as('stranger'), 'events/M1/mci/patients')));
   });
 
   it('never reads the event document, other events, other logins or TAK history', async () => {
@@ -418,6 +434,7 @@ describe('MCI role logins', () => {
   it('writes nothing directly', async () => {
     const db = responder();
     await assertFails(setDoc(doc(db, 'events/M1/mci/state'), { active: false }));
+    await assertFails(setDoc(doc(db, 'events/M1/mci/patients'), { patients: {}, updatedAt: now }));
     await assertFails(updateDoc(doc(db, 'events/M1'), { calls: [] }));
     await assertFails(updateDoc(doc(db, 'events/M1/roleAccounts/RA'), { disabled: false }));
     await assertFails(setDoc(doc(db, 'events/M1/takDeviceLinks/DEV2'), { teamId: 't1', linkedAt: now, method: 'manual', linkedBy: 'RA' }));
@@ -439,7 +456,7 @@ describe('MCI role logins', () => {
 
   it('dispatchers manage logins and write the MCI documents by their fixed names', async () => {
     const db = as('owner');
-    for (const name of ['state', 'units', 'map']) {
+    for (const name of ['state', 'units', 'map', 'patients']) {
       await assertSucceeds(setDoc(doc(db, `events/M1/mci/${name}`), { updatedAt: now }));
     }
     await assertFails(setDoc(doc(db, 'events/M1/mci/other'), { updatedAt: now }));
