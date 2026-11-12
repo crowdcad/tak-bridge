@@ -342,3 +342,114 @@ describe('existing (non-TAK) rules are unchanged', () => {
     await assertFails(setDoc(doc(as('stranger'), 'events/NEW2'), { userId: 'OWN' }));
   });
 });
+
+/**
+ * MCI role logins (crowdcad/crowdcad#142, #155): accounts with a
+ * <username>@role.crowdcad.org email, made by a dispatcher for one event. They
+ * read only that event's MCI documents and its TAK map data, never the event
+ * document, and write nothing directly (their changes go through a server
+ * route with the Admin SDK).
+ */
+describe('MCI role logins', () => {
+  const role = (uid: string, username: string) =>
+    env.authenticatedContext(uid, { email: `${username}@role.crowdcad.org` }).firestore() as unknown as Firestore;
+  const responder = () => role('RA', 'resp-abcd');
+  const account = (uid: string, eventId: string, over: Record<string, unknown> = {}) => ({
+    uid,
+    eventId,
+    role: 'responder',
+    username: `resp-${uid.toLowerCase()}`,
+    disabled: false,
+    createdBy: 'OWN',
+    ...over,
+  });
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const put = (path: string, data: Record<string, unknown>) => setDoc(doc(db, path), data);
+      await Promise.all([
+        put('events/M1', { userId: 'OWN', mapMode: 'tak', calls: [{ chiefComplaint: 'x' }] }),
+        put('events/M1/roleAccounts/RA', account('RA', 'M1')),
+        put('events/M1/roleAccounts/RB', account('RB', 'M1', { role: 'transport' })),
+        put('events/M1/roleAccounts/RD', account('RD', 'M1', { disabled: true })),
+        put('roleAccountIndex/RA', { eventId: 'M1', role: 'responder' }),
+        put('events/M1/mci/state', { active: true }),
+        put('events/M1/mci/units', { units: [] }),
+        put('events/M1/mci/map', { layers: [] }),
+        put('events/M1/takConfig/current', config('M1')),
+        put('events/M1/takMapAlignment/L1', { mapUrl: 'x', residualM: 2 }),
+        put('events/M1/takDeviceLinks/DEV1', { teamId: 't1', linkedAt: now, method: 'auto', linkedBy: 'OWN' }),
+        put('events/M1/takLive/DEV1', live()),
+        // M2: another event's MCI. M3: an ended event with a login.
+        put('events/M2', { userId: 'OWN' }),
+        put('events/M2/mci/state', { active: true }),
+        put('events/M3', { userId: 'OWN', ended: true }),
+        put('events/M3/roleAccounts/RE', account('RE', 'M3')),
+        put('events/M3/mci/state', { active: true }),
+      ]);
+    });
+  });
+
+  it("an active login reads its event's MCI documents and TAK map data", async () => {
+    const db = responder();
+    for (const path of ['mci/state', 'mci/units', 'mci/map', 'takConfig/current', 'takMapAlignment/L1', 'takDeviceLinks/DEV1', 'takLive/DEV1']) {
+      await assertSucceeds(getDoc(doc(db, `events/M1/${path}`)));
+    }
+    await assertSucceeds(getDocs(collection(db, 'events/M1/takLive')));
+    await assertSucceeds(getDocs(collection(db, 'events/M1/takDeviceLinks')));
+    await assertSucceeds(getDoc(doc(db, 'events/M1/roleAccounts/RA')));
+    await assertSucceeds(getDoc(doc(db, 'roleAccountIndex/RA')));
+  });
+
+  it('never reads the event document, other events, other logins or TAK history', async () => {
+    const db = responder();
+    await assertFails(getDoc(doc(db, 'events/M1')));
+    await assertFails(getDoc(doc(db, 'events/M2/mci/state')));
+    await assertFails(getDoc(doc(db, 'events/M1/roleAccounts/RB')));
+    await assertFails(getDocs(collection(db, 'events/M1/roleAccounts')));
+    await assertFails(getDoc(doc(db, 'events/E1/takHistory/SEG1')));
+    // Org-wide items are for normal accounts only.
+    await assertFails(getDoc(doc(db, 'events/E4')));
+    await assertFails(getDocs(query(collection(db, 'events'), where('isOrgEvent', '==', true))));
+    await assertFails(getDoc(doc(db, 'venues/V2')));
+  });
+
+  it('writes nothing directly', async () => {
+    const db = responder();
+    await assertFails(setDoc(doc(db, 'events/M1/mci/state'), { active: false }));
+    await assertFails(updateDoc(doc(db, 'events/M1'), { calls: [] }));
+    await assertFails(updateDoc(doc(db, 'events/M1/roleAccounts/RA'), { disabled: false }));
+    await assertFails(setDoc(doc(db, 'events/M1/takDeviceLinks/DEV2'), { teamId: 't1', linkedAt: now, method: 'manual', linkedBy: 'RA' }));
+    await assertFails(setDoc(doc(db, 'events/OWNED'), { userId: 'RA' }));
+  });
+
+  it('a disabled login, or a login on an ended event, reads nothing', async () => {
+    await assertFails(getDoc(doc(role('RD', 'resp-rd'), 'events/M1/mci/state')));
+    await assertFails(getDoc(doc(role('RD', 'resp-rd'), 'events/M1/takLive/DEV1')));
+    await assertFails(getDoc(doc(role('RE', 'resp-re'), 'events/M3/mci/state')));
+  });
+
+  it('a self-made account with a role email gains nothing', async () => {
+    const db = role('FAKE', 'resp-fake');
+    await assertFails(getDoc(doc(db, 'events/M1/mci/state')));
+    await assertFails(getDoc(doc(db, 'events/M1/takLive/DEV1')));
+    await assertFails(setDoc(doc(db, 'events/FAKE1'), { userId: 'FAKE' }));
+  });
+
+  it('dispatchers manage logins and write the MCI documents by their fixed names', async () => {
+    const db = as('owner');
+    for (const name of ['state', 'units', 'map']) {
+      await assertSucceeds(setDoc(doc(db, `events/M1/mci/${name}`), { updatedAt: now }));
+    }
+    await assertFails(setDoc(doc(db, 'events/M1/mci/other'), { updatedAt: now }));
+    await assertFails(setDoc(doc(as('stranger'), 'events/M1/mci/state'), { updatedAt: now }));
+    await assertSucceeds(getDocs(collection(db, 'events/M1/roleAccounts')));
+    await assertSucceeds(updateDoc(doc(db, 'events/M1/roleAccounts/RA'), { disabled: true, disabledAt: now }));
+    await assertFails(updateDoc(doc(db, 'events/M1/roleAccounts/RA'), { role: 'incident_command' }));
+    await assertSucceeds(
+      setDoc(doc(db, 'events/M1/roleAccounts/RN'), account('RN', 'M1', { role: 'responder', createdBy: 'OWN' })),
+    );
+    await assertFails(setDoc(doc(db, 'events/M1/roleAccounts/RX'), account('RX', 'M1', { role: 'admin' })));
+  });
+});
