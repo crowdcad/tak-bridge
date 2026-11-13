@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.env
+certs/
+# The enrolled TAK certificate and private key (BRIDGE_DATA_DIR)
+data/
+*.p12
+*.pfx
+*.pem
+*.key
+*.zip
+core-checkout/
+*-debug.log
