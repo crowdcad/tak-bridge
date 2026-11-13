@@ -375,6 +375,7 @@ describe('MCI role logins', () => {
         put('events/M1/roleAccounts/RL', account('RL', 'M1', { role: 'logistics' })),
         put('events/M1/roleAccounts/RI', account('RI', 'M1', { role: 'incident_command' })),
         put('events/M1/roleAccounts/RT', account('RT', 'M1', { role: 'triage' })),
+        put('events/M1/roleAccounts/RTL', account('RTL', 'M1', { role: 'treatment_lead' })),
         put('events/M1/roleAccounts/RD', account('RD', 'M1', { disabled: true })),
         put('roleAccountIndex/RA', { eventId: 'M1', role: 'responder' }),
         put('events/M1/mci/state', { active: true }),
@@ -406,8 +407,8 @@ describe('MCI role logins', () => {
     await assertSucceeds(getDoc(doc(db, 'roleAccountIndex/RA')));
   });
 
-  it('patient details: responders, transport and incident command read them; logistics does not', async () => {
-    for (const [uid, username] of [['RA', 'resp-abcd'], ['RB', 'trans-rb'], ['RI', 'ic-ri'], ['RT', 'tri-rt']] as const) {
+  it('patient details: responders, treatment leads, transport and incident command read them; logistics does not', async () => {
+    for (const [uid, username] of [['RA', 'resp-abcd'], ['RTL', 'lead-rtl'], ['RB', 'trans-rb'], ['RI', 'ic-ri'], ['RT', 'tri-rt']] as const) {
       await assertSucceeds(getDoc(doc(role(uid, username), 'events/M1/mci/patients')));
     }
     const logistics = role('RL', 'log-rl');
@@ -466,6 +467,9 @@ describe('MCI role logins', () => {
     await assertFails(updateDoc(doc(db, 'events/M1/roleAccounts/RA'), { role: 'incident_command' }));
     await assertSucceeds(
       setDoc(doc(db, 'events/M1/roleAccounts/RN'), account('RN', 'M1', { role: 'responder', createdBy: 'OWN' })),
+    );
+    await assertSucceeds(
+      setDoc(doc(db, 'events/M1/roleAccounts/RNL'), account('RNL', 'M1', { role: 'treatment_lead', createdBy: 'OWN' })),
     );
     await assertFails(setDoc(doc(db, 'events/M1/roleAccounts/RX'), account('RX', 'M1', { role: 'admin' })));
   });
